@@ -185,6 +185,12 @@
     font-size:13px;padding:9px 12px;border-radius:9px;width:170px;font-family:inherit}
   .lock-form input:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
   .lock-note{font-size:11.5px!important;color:var(--fg-dim);max-width:430px}
+  .pw-wrap{position:relative;display:inline-flex;align-items:center}
+  .pw-wrap input{padding-right:58px}
+  .pw-toggle{position:absolute;right:5px;border:none;background:transparent;color:var(--fg-dim);
+    font-size:11.5px;font-weight:700;cursor:pointer;padding:5px 7px;border-radius:6px;font-family:inherit}
+  .pw-toggle:hover{color:var(--fg);background:var(--surface)}
+  .pw-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 
   .note{font-size:12px;color:var(--fg-dim);line-height:1.5;margin-top:14px;padding:12px 14px;
     background:var(--surface-2);border-radius:10px;border:1px solid var(--border)}
@@ -223,6 +229,19 @@
     .task-row{grid-template-columns:1fr}
     .entry-form{justify-content:flex-start}
     .entry-form input{width:100%}
+
+    /* Stack the unlock form instead of letting it wrap into ragged rows. */
+    .lockscreen{padding:28px 16px}
+    .lock-form{flex-direction:column;align-items:stretch;gap:10px}
+    .lock-form input,.lock-form .pw-wrap,.lock-form button[type="submit"]{width:100%}
+    .lock-form .pw-wrap input{width:100%}
+    .lock-form button[type="submit"]{justify-content:center;padding-block:11px}
+
+    /* Keep the header tidy: the date sits under the title, not beside it. */
+    .brand-row{align-items:flex-start}
+    .clock{text-align:left}
+    .controls-row .hint{width:100%}
+    .section-head{align-items:center}
   }
 </style>
 </head>
@@ -268,7 +287,10 @@
       <p>Task Master is the source of truth for every task, so it is kept behind the owner's credentials. Sign in to view it and to add tasks.</p>
       <form class="lock-form" id="lockForm" autocomplete="off">
         <input type="text" id="authUser" placeholder="Username" autocomplete="username" aria-label="Username">
-        <input type="password" id="authPass" placeholder="Password" autocomplete="current-password" aria-label="Password">
+        <span class="pw-wrap">
+          <input type="password" id="authPass" placeholder="Password" autocomplete="current-password" aria-label="Password">
+          <button type="button" class="pw-toggle" id="pwToggle" aria-label="Show password" aria-pressed="false">Show</button>
+        </span>
         <button class="btn btn-primary" type="submit" id="authGo">Unlock</button>
       </form>
       <p class="lock-note">Credentials live in the <b>Access &amp; Employees</b> tab of the sheet. This gate controls the Task Master view and who may add tasks; the sheet itself is protected by Google's own sharing settings.</p>
@@ -952,7 +974,12 @@
     state.auth = null;
     try{ sessionStorage.removeItem("rta_auth"); }catch(e){}
     document.getElementById("authUser").value = "";
-    document.getElementById("authPass").value = "";
+    var pwField = document.getElementById("authPass");
+    pwField.value = "";
+    pwField.type = "password";
+    var tgl = document.getElementById("pwToggle");
+    tgl.textContent = "Show";
+    tgl.setAttribute("aria-pressed","false");
     renderLock();
     toast("ok","Locked","Task Master is hidden again.");
   }
@@ -1002,6 +1029,15 @@
     unlock(document.getElementById("authUser").value, document.getElementById("authPass").value);
   });
   document.getElementById("lockBtn").addEventListener("click", lockAgain);
+  document.getElementById("pwToggle").addEventListener("click", function(){
+    var field = document.getElementById("authPass");
+    var showing = field.type === "text";
+    field.type = showing ? "password" : "text";
+    this.textContent = showing ? "Show" : "Hide";
+    this.setAttribute("aria-label", showing ? "Show password" : "Hide password");
+    this.setAttribute("aria-pressed", showing ? "false" : "true");
+    field.focus();
+  });
   document.getElementById("f-name").addEventListener("keydown", function(e){ if(e.key==="Enter") addTask(); });
 
   var scrim = document.getElementById("connectScrim");
