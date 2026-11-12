@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="description" content="Interactive demo of a recurring task tracking, pending report and escalation automation system built on Google Sheets and Apps Script.">
+<meta name="description" content="Recurring task tracking, pending reports and escalation automation, backed by a live Google Sheet.">
 <style>
   :root{color-scheme:light}
   html,body{margin:0}
@@ -14,8 +14,9 @@
 <title>Recurring Task Automation</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap">
 <style>
-  /* Layout: fixed top bar (brand + Run Daily Check + simulated clock),
-     tab strip below it, single scrolling content pane per tab. */
+  /* Layout: sticky top bar (brand + connection state + actions), tab strip,
+     one scrolling pane per tab. Data comes from a live Google Sheet when
+     connected, otherwise from an in-memory demo fixture. */
   :root{
     --bg:#f4f6fb; --surface:#ffffff; --surface-2:#eef1f8; --border:#dde2ee;
     --fg:#141a2e; --fg-dim:#5b6479; --accent:#2f5fff; --accent-fg:#ffffff;
@@ -46,8 +47,10 @@
   button{font-family:inherit}
   .nums{font-variant-numeric:tabular-nums}
 
-  .shell{max-width:1040px;margin:0 auto;padding-inline:max(16px,env(safe-area-inset-left,0px)) ;padding-bottom:48px}
-  .shell{padding-right:max(16px,env(safe-area-inset-right,0px))}
+  .shell{max-width:1120px;margin:0 auto;
+    padding-left:max(16px,env(safe-area-inset-left,0px));
+    padding-right:max(16px,env(safe-area-inset-right,0px));
+    padding-bottom:48px}
 
   .topbar{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;background:var(--bg);
     padding-top:18px;padding-bottom:12px;border-bottom:1px solid var(--border)}
@@ -60,6 +63,12 @@
   .clock{font-size:12px;color:var(--fg-dim);text-align:right}
   .clock b{color:var(--fg);font-weight:600}
 
+  .mode{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:700;
+    padding:4px 10px;border-radius:99px;white-space:nowrap}
+  .mode-dot{width:7px;height:7px;border-radius:50%;background:currentColor;flex:none}
+  .mode.live{background:var(--ok-bg);color:var(--ok)}
+  .mode.demo{background:var(--warn-bg);color:var(--warn)}
+
   .controls-row{display:flex;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap}
   .btn{appearance:none;border:1px solid var(--border);background:var(--surface);color:var(--fg);
     font-weight:600;font-size:13px;padding:9px 14px;border-radius:9px;cursor:pointer;display:inline-flex;align-items:center;gap:7px;
@@ -70,6 +79,7 @@
   .btn-ghost{background:transparent;box-shadow:none}
   .btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   .btn[disabled]{opacity:.5;cursor:not-allowed;transform:none}
+  .hint{font-size:12px;color:var(--fg-dim)}
 
   .tabs{display:flex;gap:4px;margin-top:14px;border-bottom:1px solid var(--border);overflow-x:auto}
   .tab{appearance:none;border:none;background:transparent;color:var(--fg-dim);font-weight:600;font-size:13.5px;
@@ -89,6 +99,7 @@
     font-weight:600;font-size:13px;padding:8px 32px 8px 12px;border-radius:9px;cursor:pointer;
     background-image:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="10" height="6"><path d="M1 1l4 4 4-4" stroke="%235b6479" stroke-width="1.6" fill="none"/></svg>');
     background-repeat:no-repeat;background-position:right 12px center}
+  select:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 
   .task-row{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;padding:14px 16px;
     border-bottom:1px solid var(--border)}
@@ -107,7 +118,7 @@
   .entry-form input{border:1px solid var(--border);background:var(--surface-2);color:var(--fg);
     font-size:13px;padding:8px 10px;border-radius:8px;width:170px;min-width:0}
   .entry-form input::placeholder{color:var(--fg-dim)}
-  .entry-form input:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+  .entry-form input:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 
   .empty{padding:36px 16px;text-align:center;color:var(--fg-dim);font-size:13.5px}
   .empty b{display:block;color:var(--fg);font-size:14px;margin-bottom:4px}
@@ -122,6 +133,8 @@
   .table-wrap{overflow-x:auto}
   .chk{width:17px;height:17px;accent-color:var(--accent);cursor:pointer}
   .chk[disabled]{cursor:not-allowed}
+  .tm-table td,.tm-table th,.mgr-table td,.mgr-table th{white-space:nowrap}
+  .esc{color:var(--bad);font-weight:700}
 
   .log-row{display:grid;grid-template-columns:auto 1fr;gap:14px;padding:12px 16px;border-bottom:1px solid var(--border)}
   .log-row:last-child{border-bottom:none}
@@ -131,45 +144,21 @@
   .log-type.t-complete{color:var(--ok)}
   .log-type.t-alert{color:var(--warn)}
   .log-type.t-escalate{color:var(--bad)}
-  .log-type.t-ack{color:var(--accent)}
+  .log-type.t-ack,.log-type.t-create{color:var(--accent)}
 
-  .inbox-empty{padding:28px 16px;text-align:center;color:var(--fg-dim);font-size:13px}
   .mail{padding:13px 16px;border-bottom:1px solid var(--border);display:flex;gap:11px}
   .mail:last-child{border-bottom:none}
-  .mail .ic{width:30px;height:30px;border-radius:8px;flex:none;display:flex;align-items:center;justify-content:center;
-    font-size:14px;font-weight:700}
+  .mail .ic{width:30px;height:30px;border-radius:8px;flex:none;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700}
   .mail.alert .ic{background:var(--warn-bg);color:var(--warn)}
   .mail.escalate .ic{background:var(--bad-bg);color:var(--bad)}
-  .mail .body{min-width:0}
   .mail .to{font-size:11px;color:var(--fg-dim)}
   .mail .subj{font-size:13px;font-weight:600;margin:1px 0 2px}
   .mail .snippet{font-size:12px;color:var(--fg-dim)}
 
-  .toast-stack{position:fixed;left:50%;bottom:max(22px,env(safe-area-inset-bottom,0px));transform:translateX(-50%);
-    display:flex;flex-direction:column;gap:8px;z-index:50;width:min(92vw,360px)}
-  .toast{background:var(--surface);border:1px solid var(--border);box-shadow:var(--shadow);border-radius:11px;
-    padding:11px 14px;font-size:13px;display:flex;gap:9px;align-items:flex-start;animation:toastIn .18s ease}
-  .toast b{display:block;font-size:12px;margin-bottom:1px}
-  .toast.ok{border-left:3px solid var(--ok)}
-  .toast.warn{border-left:3px solid var(--warn)}
-  .toast.bad{border-left:3px solid var(--bad)}
-  @keyframes toastIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
-
-  .note{font-size:12px;color:var(--fg-dim);line-height:1.5;margin-top:14px;padding:12px 14px;
-    background:var(--surface-2);border-radius:10px;border:1px solid var(--border)}
-
-  @media (max-width:560px){
-    .task-row{grid-template-columns:1fr}
-    .entry-form{justify-content:flex-start}
-    .entry-form input{width:100%}
-  }
-  .mgr-table td,.mgr-table th{white-space:nowrap}
-  .esc{color:var(--bad);font-weight:700}
   .lock-pill{display:inline-flex;align-items:center;gap:4px;font-size:10.5px;font-weight:700;letter-spacing:.03em;
     padding:3px 8px;border-radius:99px;background:var(--surface-2);color:var(--fg-dim);
     border:1px solid var(--border);vertical-align:middle;margin-left:6px;font-family:var(--font-body)}
-  .tm-table td,.tm-table th{white-space:nowrap}
-  .addform-card{margin-bottom:4px}
+
   .addform{display:grid;grid-template-columns:repeat(auto-fit,minmax(158px,1fr));gap:12px;padding:16px}
   .addform label{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.04em;
     font-weight:700;color:var(--fg-dim);margin-bottom:5px}
@@ -179,7 +168,45 @@
   .addform input:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
   .addform .actions{display:flex;gap:8px;align-items:flex-end}
   .addform-note{padding:0 16px 14px;font-size:11.5px;color:var(--fg-dim)}
-  .log-type.t-create{color:var(--accent)}
+
+  .note{font-size:12px;color:var(--fg-dim);line-height:1.5;margin-top:14px;padding:12px 14px;
+    background:var(--surface-2);border-radius:10px;border:1px solid var(--border)}
+
+  .toast-stack{position:fixed;left:50%;bottom:max(22px,env(safe-area-inset-bottom,0px));transform:translateX(-50%);
+    display:flex;flex-direction:column;gap:8px;z-index:60;width:min(92vw,380px)}
+  .toast{background:var(--surface);border:1px solid var(--border);box-shadow:var(--shadow);border-radius:11px;
+    padding:11px 14px;font-size:13px;animation:toastIn .18s ease}
+  .toast b{display:block;font-size:12px;margin-bottom:1px}
+  .toast.ok{border-left:3px solid var(--ok)}
+  .toast.warn{border-left:3px solid var(--warn)}
+  .toast.bad{border-left:3px solid var(--bad)}
+  @keyframes toastIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+  /* connect dialog */
+  .scrim{position:fixed;inset:0;background:rgba(10,14,26,.55);z-index:70;display:flex;align-items:center;justify-content:center;
+    padding:max(16px,env(safe-area-inset-left,0px))}
+  .scrim[hidden]{display:none!important}
+  .dialog{background:var(--surface);border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow);
+    width:min(560px,100%);max-height:86vh;overflow-y:auto;padding:22px}
+  .dialog h2{font-size:17px;margin-bottom:6px}
+  .dialog p{font-size:13px;color:var(--fg-dim);line-height:1.55;margin:0 0 14px}
+  .dialog ol{font-size:13px;color:var(--fg-dim);line-height:1.6;margin:0 0 14px;padding-left:20px}
+  .dialog ol b{color:var(--fg)}
+  .dialog input[type=url]{width:100%;border:1px solid var(--border);background:var(--surface-2);color:var(--fg);
+    font-size:13px;padding:10px 12px;border-radius:9px;font-family:inherit}
+  .dialog input[type=url]:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+  .dialog-actions{display:flex;gap:9px;margin-top:14px;flex-wrap:wrap}
+
+  .spinner{width:14px;height:14px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;
+    display:inline-block;animation:spin .7s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  @media (prefers-reduced-motion: reduce){ .spinner{animation:none} .toast{animation:none} }
+
+  @media (max-width:560px){
+    .task-row{grid-template-columns:1fr}
+    .entry-form{justify-content:flex-start}
+    .entry-form input{width:100%}
+  }
 </style>
 </head>
 <body>
@@ -190,22 +217,23 @@
         <div class="mark">AI</div>
         <div>
           <h1>Recurring Task Automation</h1>
-          <div class="sub">Interactive demo · mock data, not connected to the live Google Sheet</div>
+          <div class="sub" id="modeLine"><span class="mode demo"><span class="mode-dot"></span>Demo data</span></div>
         </div>
       </div>
-      <div class="clock">Simulated "today"<br><b class="nums" id="todayLabel"></b></div>
+      <div class="clock">Today<br><b class="nums" id="todayLabel"></b></div>
     </div>
     <div class="controls-row">
       <button class="btn btn-primary" id="runCheckBtn">▶ Run daily check now</button>
-      <button class="btn btn-ghost" id="resetBtn">↺ Reset demo data</button>
-      <span style="font-size:12px;color:var(--fg-dim)" id="checkHint">Sends manager alerts + leadership escalations for anything overdue, same as the real script.</span>
+      <button class="btn" id="connectBtn">⚙ Connect to sheet</button>
+      <button class="btn btn-ghost" id="refreshBtn">↻ Refresh</button>
+      <span class="hint" id="checkHint">Sends manager alerts and leadership escalations for anything overdue.</span>
     </div>
     <div class="tabs" role="tablist">
       <button class="tab" role="tab" aria-selected="false" data-tab="taskmaster">Task Master 🔒</button>
       <button class="tab" role="tab" aria-selected="true" data-tab="employee">Employee Pending View</button>
       <button class="tab" role="tab" aria-selected="false" data-tab="manager">Manager Dashboard</button>
       <button class="tab" role="tab" aria-selected="false" data-tab="log">Escalation Log</button>
-      <button class="tab" role="tab" aria-selected="false" data-tab="inbox">Simulated Inbox <span id="inboxCount" class="nums"></span></button>
+      <button class="tab" role="tab" aria-selected="false" data-tab="inbox" id="inboxTab">Simulated Inbox <span id="inboxCount" class="nums"></span></button>
     </div>
   </div>
 
@@ -215,7 +243,7 @@
       <h2>Task Master <span class="lock-pill">🔒 Owner only</span></h2>
       <button class="btn btn-primary" id="addToggle">+ Add task</button>
     </div>
-    <div class="card addform-card" id="addFormCard" hidden>
+    <div class="card" id="addFormCard" hidden>
       <div class="addform">
         <div><label for="f-name">Task name</label><input type="text" id="f-name" placeholder="e.g. Daily Dispatch Log"></div>
         <div><label for="f-emp">Assigned to</label><select id="f-emp"></select></div>
@@ -227,7 +255,7 @@
           <button class="btn btn-ghost" id="addCancel">Cancel</button>
         </div>
       </div>
-      <div class="addform-note">Task ID is generated automatically, so a duplicate can never be created by hand — the same guard the live sheet enforces with data validation on column A.</div>
+      <div class="addform-note">Task ID is generated automatically, so a duplicate can never be created by hand — the same guard the sheet enforces with validation on column A.</div>
     </div>
     <div class="section-head" style="margin-top:14px">
       <span class="meta">Single source of truth · every other tab is derived from this</span>
@@ -244,7 +272,7 @@
         <tbody id="tmBody"></tbody>
       </table>
     </div>
-    <div class="note">This tab is read-only here because it is read-only in the real sheet — locked to the owner's account, so no employee can edit a Task ID, reassign work, or backdate a completion. Everything you see filled in below (completion dates, alert stamps, escalation stamps) was written by the script, never typed by hand. Scroll sideways to see all 16 columns.</div>
+    <div class="note" id="tmNote">Read-only here because it is read-only in the sheet — locked to the owner's account, so no employee can edit a Task ID, reassign work, or backdate a completion. The completion, alert and escalation columns are written by the automation, never typed by hand. Scroll sideways for all 16 columns.</div>
   </section>
 
   <!-- EMPLOYEE VIEW -->
@@ -254,7 +282,7 @@
       <select id="empSelect"></select>
     </div>
     <div class="card" id="empList"></div>
-    <div class="note">Type <b>DONE</b> for a daily task, or a ticket ID for one that requires one, then press Enter. "done" in any case auto-corrects to <b>DONE</b>, and a ticket task rejects a bare DONE — exactly like the real sheet.</div>
+    <div class="note">Type <b>DONE</b> for a daily task, or a ticket ID for one that requires one, then press Enter. "done" in any case auto-corrects to <b>DONE</b>, and a ticket task rejects a bare DONE.</div>
   </section>
 
   <!-- MANAGER DASHBOARD -->
@@ -284,14 +312,35 @@
     <div class="card" id="logList"></div>
   </section>
 
-  <!-- INBOX -->
+  <!-- INBOX (demo only) -->
   <section class="panel" id="panel-inbox" hidden>
     <div class="section-head">
       <h2>Simulated inbox</h2>
-      <span class="meta">What the manager / leadership would actually receive</span>
+      <span class="meta">What the manager / leadership would receive</span>
     </div>
     <div class="card" id="inboxList"></div>
   </section>
+</div>
+
+<!-- CONNECT DIALOG -->
+<div class="scrim" id="connectScrim" hidden>
+  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="connectTitle">
+    <h2 id="connectTitle">Connect to your Google Sheet</h2>
+    <p>Right now this page is running on demo data. Point it at your sheet's Web App URL and it will read and write the real thing.</p>
+    <ol>
+      <li>In the sheet, open <b>Extensions → Apps Script</b> and paste in <b>WebApp.gs</b> from the repo.</li>
+      <li><b>Deploy → New deployment → Web app.</b></li>
+      <li>Set <b>Execute as: Me</b> and <b>Who has access: Anyone</b>, then Deploy and authorize.</li>
+      <li>Copy the <b>Web app URL</b> (ends in <b>/exec</b>) and paste it below.</li>
+    </ol>
+    <input type="url" id="endpointInput" placeholder="https://script.google.com/macros/s/AKfy.../exec" autocomplete="off" spellcheck="false">
+    <div class="dialog-actions">
+      <button class="btn btn-primary" id="connectSave">Connect</button>
+      <button class="btn btn-ghost" id="connectDemo">Use demo data</button>
+      <button class="btn btn-ghost" id="connectCancel">Cancel</button>
+    </div>
+    <p style="margin-top:14px;margin-bottom:0;font-size:12px">The URL is stored in this browser only. Nothing is sent anywhere except your own Apps Script endpoint.</p>
+  </div>
 </div>
 
 <div class="toast-stack" id="toastStack"></div>
@@ -300,355 +349,548 @@
 (function(){
   "use strict";
 
-  // ---------- virtual clock ----------
-  var TODAY = new Date(2026,10,12); // Nov 12 2026 — matches the real sheet's current state
-  function fmt(d){ if(!d) return ""; var dt=(d instanceof Date)?d:new Date(d);
-    return dt.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'}); }
-  function addDays(d,n){ var r=new Date(d); r.setDate(r.getDate()+n); return r; }
-  function diffDays(a,b){ return Math.round((a-b)/86400000); }
-  document.getElementById('todayLabel').textContent = fmt(TODAY);
-
   var EMPLOYEES = ["Employee A","Employee B","Employee C","Employee D","Employee E","Employee F"];
+  var STORE_KEY = "rta_endpoint";
 
-  function seedTasks(){
-    return [
-      {id:"TASK-001",name:"Daily Operations Update",employee:"Employee A",freq:1,ticket:false,due:addDays(TODAY,-3)},
-      {id:"TASK-010",name:"Monthly Expense Report",employee:"Employee A",freq:1,ticket:true,due:addDays(TODAY,-3)},
-      {id:"TASK-012",name:"Supplier Payment Ticket",employee:"Employee A",freq:7,ticket:true,due:addDays(TODAY,-5)},
-      {id:"TASK-026",name:"Stock Reconciliation Check",employee:"Employee A",freq:1,ticket:false,due:addDays(TODAY,0)},
-      {id:"TASK-016",name:"Weekly Vendor Call Log",employee:"Employee A",freq:7,ticket:true,due:addDays(TODAY,4)},
-      {id:"TASK-002",name:"Portal Task A",employee:"Employee B",freq:7,ticket:true,due:addDays(TODAY,6)},
-      {id:"TASK-005",name:"Weekly Compliance Check",employee:"Employee B",freq:7,ticket:true,due:addDays(TODAY,-4)},
-      {id:"TASK-009",name:"Vendor Invoice Reconciliation",employee:"Employee C",freq:7,ticket:true,due:addDays(TODAY,-1)},
-      {id:"TASK-011",name:"Daily Standup Update",employee:"Employee D",freq:1,ticket:false,due:addDays(TODAY,0)},
-      {id:"TASK-014",name:"Stock Check",employee:"Employee E",freq:1,ticket:false,due:addDays(TODAY,0)},
-      {id:"TASK-015",name:"Review Video",employee:"Employee F",freq:2,ticket:false,due:addDays(TODAY,1)},
-      {id:"TASK-017",name:"Packaging QA Check",employee:"Employee B",freq:1,ticket:false,due:addDays(TODAY,0)},
-      {id:"TASK-018",name:"Raw Material Reorder",employee:"Employee C",freq:7,ticket:true,due:addDays(TODAY,5)},
-      {id:"TASK-020",name:"Courier Dispatch Log",employee:"Employee E",freq:7,ticket:true,due:addDays(TODAY,-2)}
-    ].map(function(t){
-      return Object.assign(t,{
-        cycleStart:new Date(t.due),
-        lastCompleted:null, completedBy:null, ticketProof:null,
-        alertSent:null, mgrAck:false, ackDate:null, escalated:null
-      });
-    });
+  var state = {
+    mode: "demo",            // "demo" | "live"
+    endpoint: "",
+    tasks: [], log: [], inbox: [],
+    selectedEmployee: "Employee A",
+    busy: false
+  };
+
+  // Demo mode pins "today" so the fixture always tells the same story.
+  var DEMO_TODAY = new Date(2026,10,12);
+  function today(){ return state.mode === "live" ? stripTime(new Date()) : DEMO_TODAY; }
+  function stripTime(d){ return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
+  function addDays(d,n){ var r = new Date(d); r.setDate(r.getDate()+n); return r; }
+  function diffDays(a,b){ return Math.round((a-b)/86400000); }
+  function parseDate(v){
+    if(!v) return null;
+    if(v instanceof Date) return v;
+    var p = String(v).split("-");
+    if(p.length===3) return new Date(+p[0], +p[1]-1, +p[2]);
+    var d = new Date(v); return isNaN(d) ? null : d;
   }
-
-  var state = { tasks:[], log:[], inbox:[], selectedEmployee:"Employee A" };
+  function fmt(d){
+    var dt = parseDate(d);
+    if(!dt) return "";
+    return dt.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
+  }
 
   function status(t){
-    var d = diffDays(TODAY, stripTime(t.due));
-    if (d > 0) return "Overdue";
-    if (d === 0) return "Due Today";
+    if(t._status) return t._status;                 // live: the sheet decides
+    var d = diffDays(today(), stripTime(parseDate(t.due)));
+    if(d > 0) return "Overdue";
+    if(d === 0) return "Due Today";
     return "Upcoming";
   }
-  function stripTime(d){ return new Date(d.getFullYear(),d.getMonth(),d.getDate()); }
-  function daysOverdue(t){ var d = diffDays(TODAY, stripTime(t.due)); return Math.max(0,d); }
-
+  function daysOverdue(t){
+    if(typeof t._days === "number") return t._days;
+    var d = diffDays(today(), stripTime(parseDate(t.due)));
+    return Math.max(0, d);
+  }
   function pill(st){
-    if(st==="Overdue") return '<span class="pill pill-bad"><span class="pill-dot"></span>Overdue</span>';
+    if(st==="Overdue")   return '<span class="pill pill-bad"><span class="pill-dot"></span>Overdue</span>';
     if(st==="Due Today") return '<span class="pill pill-warn"><span class="pill-dot"></span>Due Today</span>';
     return '<span class="pill pill-ok"><span class="pill-dot"></span>Upcoming</span>';
   }
 
+  // ---------- demo fixture ----------
+  function seedTasks(){
+    var T = DEMO_TODAY;
+    return [
+      {id:"TASK-001",name:"Daily Operations Update",employee:"Employee A",freq:1,ticket:false,due:addDays(T,-3)},
+      {id:"TASK-010",name:"Monthly Expense Report",employee:"Employee A",freq:1,ticket:true,due:addDays(T,-3)},
+      {id:"TASK-012",name:"Supplier Payment Ticket",employee:"Employee A",freq:7,ticket:true,due:addDays(T,-5)},
+      {id:"TASK-026",name:"Stock Reconciliation Check",employee:"Employee A",freq:1,ticket:false,due:addDays(T,0)},
+      {id:"TASK-016",name:"Weekly Vendor Call Log",employee:"Employee A",freq:7,ticket:true,due:addDays(T,4)},
+      {id:"TASK-002",name:"Portal Task A",employee:"Employee B",freq:7,ticket:true,due:addDays(T,6)},
+      {id:"TASK-005",name:"Weekly Compliance Check",employee:"Employee B",freq:7,ticket:true,due:addDays(T,-4)},
+      {id:"TASK-017",name:"Packaging QA Check",employee:"Employee B",freq:1,ticket:false,due:addDays(T,0)},
+      {id:"TASK-009",name:"Vendor Invoice Reconciliation",employee:"Employee C",freq:7,ticket:true,due:addDays(T,-1)},
+      {id:"TASK-018",name:"Raw Material Reorder",employee:"Employee C",freq:7,ticket:true,due:addDays(T,5)},
+      {id:"TASK-011",name:"Daily Standup Update",employee:"Employee D",freq:1,ticket:false,due:addDays(T,0)},
+      {id:"TASK-014",name:"Stock Check",employee:"Employee E",freq:1,ticket:false,due:addDays(T,0)},
+      {id:"TASK-020",name:"Courier Dispatch Log",employee:"Employee E",freq:7,ticket:true,due:addDays(T,-2)},
+      {id:"TASK-015",name:"Review Video",employee:"Employee F",freq:2,ticket:false,due:addDays(T,1)}
+    ].map(function(t){
+      return Object.assign(t,{ cycleStart:new Date(t.due), lastCompleted:null, completedBy:null,
+        ticketProof:null, alertSent:null, mgrAck:false, ackDate:null, escalated:null });
+    });
+  }
+
+  // ---------- networking ----------
+  function apiGet(){
+    return fetch(state.endpoint, { method:"GET", redirect:"follow" })
+      .then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.json(); });
+  }
+  function apiPost(payload){
+    // text/plain keeps this a "simple" request, so the browser skips the
+    // CORS preflight that Apps Script cannot answer.
+    return fetch(state.endpoint, {
+      method:"POST", redirect:"follow",
+      headers:{ "Content-Type":"text/plain;charset=utf-8" },
+      body: JSON.stringify(payload)
+    }).then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.json(); });
+  }
+
+  function adoptServerState(data){
+    state.tasks = (data.tasks||[]).map(function(t){
+      return {
+        id:t.id, name:t.name, employee:t.employee, freq:t.freq, ticket:t.ticket,
+        cycleStart:parseDate(t.cycleStart), lastCompleted:parseDate(t.lastCompleted),
+        completedBy:t.completedBy, ticketProof:t.ticketProof,
+        due:parseDate(t.due), _status:t.status, _days:t.daysOverdue,
+        alertSent:parseDate(t.alertSent), mgrAck:t.mgrAck,
+        ackDate:parseDate(t.ackDate), escalated:parseDate(t.escalated)
+      };
+    });
+    state.log = (data.log||[]).map(function(e){
+      var typeMap = {"Task Completed":"complete","Manager Alert Sent":"alert",
+        "Leadership Escalation":"escalate","Manager Acknowledged":"ack","Task Created":"created"};
+      return { time:new Date(e.time), taskId:e.taskId, taskName:e.taskName,
+               who:e.employee, type:typeMap[e.type]||"ack", label:e.type, detail:e.detail };
+    });
+    if(data.employees && data.employees.length) EMPLOYEES = data.employees;
+  }
+
+  function setBusy(on, label){
+    state.busy = on;
+    ["runCheckBtn","refreshBtn","addSave"].forEach(function(id){
+      var el = document.getElementById(id); if(el) el.disabled = on;
+    });
+    var hint = document.getElementById("checkHint");
+    if(on && label) hint.innerHTML = '<span class="spinner"></span> '+label;
+    else hint.textContent = state.mode==="live"
+      ? "Sends real emails and writes back to your sheet."
+      : "Sends manager alerts and leadership escalations for anything overdue.";
+  }
+
+  function goLive(url){
+    state.endpoint = url; state.mode = "live";
+    setBusy(true, "Connecting…");
+    return apiGet().then(function(data){
+      if(!data.ok) throw new Error(data.error||"The endpoint returned an error.");
+      adoptServerState(data);
+      try{ localStorage.setItem(STORE_KEY, url); }catch(e){}
+      renderMode(); renderEmpSelect(); renderAll(); setBusy(false);
+      toast("ok","Connected", state.tasks.length+" tasks loaded from your sheet.");
+    }).catch(function(err){
+      state.mode = "demo"; state.endpoint = "";
+      renderMode(); setBusy(false);
+      toast("bad","Could not connect", friendlyError(err));
+      throw err;
+    });
+  }
+
+  function friendlyError(err){
+    var m = String(err && err.message || err);
+    if(/Failed to fetch|NetworkError|TypeError/i.test(m))
+      return "The browser could not reach that URL. Check the deployment is set to “Anyone” and the URL ends in /exec.";
+    if(/HTTP 401|HTTP 403/.test(m))
+      return "Access denied. In the deployment settings, set “Who has access” to Anyone.";
+    if(/HTTP 404/.test(m)) return "That URL returned 404. Re-copy the Web app URL from Deploy › Manage deployments.";
+    return m;
+  }
+
+  function goDemo(){
+    state.mode = "demo"; state.endpoint = "";
+    try{ localStorage.removeItem(STORE_KEY); }catch(e){}
+    state.tasks = seedTasks(); state.log = []; state.inbox = [];
+    renderMode(); renderEmpSelect(); renderAll(); setBusy(false);
+  }
+
+  function refresh(){
+    if(state.mode!=="live"){ goDemo(); toast("ok","Demo reset","Back to the starting scenario."); return; }
+    setBusy(true,"Refreshing…");
+    apiGet().then(function(data){
+      if(!data.ok) throw new Error(data.error);
+      adoptServerState(data); renderAll(); setBusy(false);
+      toast("ok","Refreshed","Latest data pulled from the sheet.");
+    }).catch(function(err){ setBusy(false); toast("bad","Refresh failed", friendlyError(err)); });
+  }
+
+  // ---------- actions ----------
+  function completeTask(id, raw){
+    var t = state.tasks.filter(function(x){ return x.id===id; })[0];
+    if(!t) return;
+    var entry = String(raw||"").trim();
+    if(!entry){ toast("warn","Nothing entered","Type a value before submitting."); return; }
+    if(entry.toUpperCase()==="DONE") entry = "DONE";
+    if(t.ticket && entry==="DONE"){
+      toast("bad","⚠ Update not saved","This task requires a Ticket ID, not DONE.");
+      return;
+    }
+
+    if(state.mode==="live"){
+      setBusy(true,"Saving to sheet…");
+      apiPost({action:"complete", taskId:id, entry:entry, employee:state.selectedEmployee})
+        .then(function(res){
+          if(!res.ok) throw new Error(res.error);
+          adoptServerState(res); renderAll(); setBusy(false);
+          toast("ok","✅ Saved to sheet", res.message||"Completion recorded.");
+        }).catch(function(err){ setBusy(false); toast("bad","Not saved", friendlyError(err)); });
+      return;
+    }
+
+    var now = today();
+    t.lastCompleted = new Date(now);
+    t.completedBy = state.selectedEmployee;
+    t.ticketProof = t.ticket ? entry : "Daily update confirmed";
+    t.due = addDays(now, t.freq);
+    t.alertSent = null; t.mgrAck = false; t.ackDate = null; t.escalated = null;
+    pushLog("complete", t.id, t.name, state.selectedEmployee,
+      t.ticket ? "Ticket "+entry+" logged by "+state.selectedEmployee
+               : "Daily update confirmed by "+state.selectedEmployee);
+    toast("ok","✅ Saved", t.id+" marked complete. Next cycle: "+fmt(t.due)+".");
+    renderAll();
+  }
+
+  function addTask(){
+    var name = document.getElementById("f-name").value.trim();
+    var emp = document.getElementById("f-emp").value;
+    var freq = parseInt(document.getElementById("f-freq").value,10);
+    var ticket = document.getElementById("f-ticket").value === "yes";
+    var startStr = document.getElementById("f-start").value;
+
+    if(!name){ toast("bad","Task name required","Give the task a name before creating it."); return; }
+    if(isNaN(freq)||freq<1){ toast("bad","Invalid frequency","Frequency must be at least 1 day."); return; }
+    if(!startStr){ toast("bad","Cycle start required","Pick the date this task's first cycle begins."); return; }
+
+    if(state.mode==="live"){
+      setBusy(true,"Adding to sheet…");
+      apiPost({action:"add", name:name, employee:emp, freq:freq, ticket:ticket, cycleStart:startStr})
+        .then(function(res){
+          if(!res.ok) throw new Error(res.error);
+          adoptServerState(res); renderAll(); setBusy(false);
+          document.getElementById("f-name").value = "";
+          document.getElementById("addFormCard").hidden = true;
+          toast("ok","Task created", res.message||"Added to the sheet.");
+        }).catch(function(err){ setBusy(false); toast("bad","Not added", friendlyError(err)); });
+      return;
+    }
+
+    var max = 0;
+    state.tasks.forEach(function(t){
+      var n = parseInt(String(t.id).replace(/\D/g,""),10);
+      if(!isNaN(n) && n>max) max = n;
+    });
+    var id = "TASK-" + ("00"+(max+1)).slice(-3);
+    var p = startStr.split("-");
+    var start = new Date(+p[0], +p[1]-1, +p[2]);
+    state.tasks.push({ id:id, name:name, employee:emp, freq:freq, ticket:ticket,
+      due:new Date(start), cycleStart:new Date(start), lastCompleted:null, completedBy:null,
+      ticketProof:null, alertSent:null, mgrAck:false, ackDate:null, escalated:null });
+    pushLog("created", id, name, emp,
+      "Task created — "+(freq===1?"daily":"every "+freq+" days")+", "+
+      (ticket?"ticket ID required":"DONE confirmation only")+", first cycle "+fmt(start)+".");
+    toast("ok","Task created", id+" — "+name+", assigned to "+emp+".");
+    document.getElementById("f-name").value = "";
+    document.getElementById("addFormCard").hidden = true;
+    renderAll();
+  }
+
+  function acknowledge(id){
+    if(state.mode==="live"){
+      setBusy(true,"Acknowledging…");
+      apiPost({action:"acknowledge", taskId:id}).then(function(res){
+        if(!res.ok) throw new Error(res.error);
+        adoptServerState(res); renderAll(); setBusy(false);
+        toast("ok","Acknowledged", res.message||"");
+      }).catch(function(err){ setBusy(false); toast("bad","Not saved", friendlyError(err)); renderAll(); });
+      return;
+    }
+    var t = state.tasks.filter(function(x){ return x.id===id; })[0];
+    if(!t || t.mgrAck) return;
+    t.mgrAck = true; t.ackDate = new Date(today());
+    pushLog("ack", t.id, t.name, t.employee,
+      "Manager acknowledged on the dashboard. The unresolved ceiling still applies.");
+    toast("ok","Acknowledged", t.id+" acknowledged by manager.");
+    renderAll();
+  }
+
+  function runDailyCheck(){
+    if(state.mode==="live"){
+      setBusy(true,"Running check…");
+      apiPost({action:"dailycheck"}).then(function(res){
+        if(!res.ok) throw new Error(res.error);
+        adoptServerState(res); renderAll(); setBusy(false);
+        toast(res.alerts||res.escalations ? "warn":"ok","Daily check complete",
+          (res.message||"")+" Real emails were sent.");
+        switchTab("log");
+      }).catch(function(err){ setBusy(false); toast("bad","Check failed", friendlyError(err)); });
+      return;
+    }
+
+    var sentAny = false, now = today();
+    state.tasks.forEach(function(t){
+      var st = status(t);
+      if(st!=="Overdue" && st!=="Due Today") return;
+      if(!t.alertSent){
+        t.alertSent = new Date(now);
+        pushLog("alert", t.id, t.name, t.employee,
+          "Automated email sent to the manager the same day the task became due/overdue.");
+        pushMail("alert","manager@allo-innoware.example",
+          "[Allo Innoware] Pending task: "+t.name+" ("+t.employee+")",
+          t.id+" — "+t.name+", assigned to "+t.employee+", was due "+fmt(t.due)+" and is not yet complete.");
+        sentAny = true; return;
+      }
+      if(t.escalated) return;
+      var hoursSinceAlert = (now - t.alertSent)/36e5;
+      var hoursSinceDue = (now - stripTime(parseDate(t.due)))/36e5;
+      var noAck = !t.mgrAck && hoursSinceAlert >= 24;
+      var tooLong = hoursSinceDue >= 72;
+      if(noAck || tooLong){
+        t.escalated = new Date(now);
+        var reason = noAck ? "No manager acknowledgment within the 24-hour window."
+          : "Task still unresolved "+Math.floor(hoursSinceDue)+" hours after its due date.";
+        pushLog("escalate", t.id, t.name, t.employee, "Escalated to leadership. "+reason);
+        pushMail("escalate","leadership@allo-innoware.example",
+          "[Allo Innoware] ESCALATION: "+t.name+" ("+t.employee+") unresolved",
+          t.id+" — "+t.name+" remains unresolved. "+reason);
+        sentAny = true;
+      }
+    });
+    renderAll();
+    toast(sentAny?"warn":"ok","Daily check complete",
+      sentAny ? "New emails are in the Simulated Inbox tab." : "Nothing needed an alert or escalation.");
+    if(sentAny) switchTab("inbox");
+  }
+
+  // ---------- log / toast helpers ----------
   function pushLog(type, taskId, taskName, who, detail){
-    state.log.unshift({ time:new Date(TODAY.getTime()+state.log.length*60000), type:type, taskId:taskId, taskName:taskName, who:who, detail:detail });
-    renderLog();
+    var labels = {complete:"Task Completed",alert:"Manager Alert Sent",
+      escalate:"Leadership Escalation",ack:"Manager Acknowledged",created:"Task Created"};
+    state.log.unshift({ time:new Date(today().getTime()+state.log.length*60000),
+      type:type, label:labels[type], taskId:taskId, taskName:taskName, who:who, detail:detail });
   }
-  function pushMail(kind, to, subject, snippet){
-    state.inbox.unshift({kind:kind, to:to, subject:subject, snippet:snippet});
-    renderInbox();
-  }
-  function toast(kind, title, msg){
-    var stack = document.getElementById('toastStack');
-    var el = document.createElement('div');
-    el.className = 'toast '+kind;
-    el.innerHTML = '<div><b>'+title+'</b>'+msg+'</div>';
+  function pushMail(kind,to,subject,snippet){ state.inbox.unshift({kind:kind,to:to,subject:subject,snippet:snippet}); }
+  function toast(kind,title,msg){
+    var stack = document.getElementById("toastStack");
+    var el = document.createElement("div");
+    el.className = "toast "+kind;
+    el.innerHTML = "<b>"+title+"</b>"+(msg||"");
     stack.appendChild(el);
-    setTimeout(function(){ el.style.transition='opacity .25s ease'; el.style.opacity='0'; setTimeout(function(){ el.remove(); },250); }, 4200);
+    setTimeout(function(){ el.style.transition="opacity .25s ease"; el.style.opacity="0";
+      setTimeout(function(){ el.remove(); },250); }, 5200);
   }
 
   // ---------- rendering ----------
+  function renderMode(){
+    var live = state.mode==="live";
+    document.getElementById("modeLine").innerHTML = live
+      ? '<span class="mode live"><span class="mode-dot"></span>Live — connected to Google Sheet</span>'
+      : '<span class="mode demo"><span class="mode-dot"></span>Demo data — not connected</span>';
+    document.getElementById("todayLabel").textContent = fmt(today());
+    document.getElementById("connectBtn").textContent = live ? "⚙ Sheet settings" : "⚙ Connect to sheet";
+    document.getElementById("refreshBtn").textContent = live ? "↻ Refresh" : "↺ Reset demo data";
+    document.getElementById("inboxTab").hidden = live;
+    if(live && document.getElementById("panel-inbox").hidden === false) switchTab("log");
+    document.getElementById("tmNote").textContent = live
+      ? "This is your real Task Master, read live from the sheet. It is read-only here because the sheet is locked to the owner's account — completions, alerts and escalations are written by the automation. Scroll sideways for all 16 columns."
+      : "Read-only here because it is read-only in the sheet — locked to the owner's account. The completion, alert and escalation columns are written by the automation, never typed by hand. Scroll sideways for all 16 columns.";
+    setBusy(false);
+  }
+
   function renderEmpSelect(){
-    var sel = document.getElementById('empSelect');
-    sel.innerHTML = EMPLOYEES.map(function(e){ return '<option value="'+e+'">'+e+'</option>'; }).join('');
+    var sel = document.getElementById("empSelect");
+    if(EMPLOYEES.indexOf(state.selectedEmployee) === -1) state.selectedEmployee = EMPLOYEES[0];
+    sel.innerHTML = EMPLOYEES.map(function(e){ return '<option value="'+e+'">'+e+'</option>'; }).join("");
     sel.value = state.selectedEmployee;
+    var f = document.getElementById("f-emp");
+    f.innerHTML = EMPLOYEES.map(function(e){ return '<option value="'+e+'">'+e+'</option>'; }).join("");
   }
 
   function renderEmployeePanel(){
-    var list = document.getElementById('empList');
+    var list = document.getElementById("empList");
     var mine = state.tasks.filter(function(t){ return t.employee===state.selectedEmployee; })
-      .filter(function(t){ return status(t)!=="done"; })
-      .sort(function(a,b){ return a.due-b.due; });
-
+      .sort(function(a,b){ return parseDate(a.due) - parseDate(b.due); });
     if(mine.length===0){
       list.innerHTML = '<div class="empty"><b>Nothing pending</b>All caught up for '+state.selectedEmployee+'.</div>';
       return;
     }
     list.innerHTML = mine.map(function(t){
       var st = status(t);
-      var placeholder = t.ticket ? "Enter Ticket ID" : "Type DONE";
+      var ph = t.ticket ? "Enter Ticket ID" : "Type DONE";
+      var od = daysOverdue(t);
       return '<div class="task-row" data-id="'+t.id+'">'+
-        '<div class="task-main">'+
-          '<div class="task-name">'+t.name+'</div>'+
-          '<div class="task-sub">'+pill(st)+
-            '<span class="nums">Due '+fmt(t.due)+'</span>'+
-            (st==="Overdue" ? '<span class="nums">'+daysOverdue(t)+(daysOverdue(t)===1?' day':' days')+' overdue</span>' : '')+
-            '<span>'+(t.freq===1?'Daily':'Every '+t.freq+' days')+'</span>'+
-          '</div>'+
-        '</div>'+
-        '<div class="entry-form">'+
-          '<input type="text" placeholder="'+placeholder+'" aria-label="'+placeholder+' for '+t.name+'">'+
-          '<button class="btn btn-primary submit-btn">Submit</button>'+
-        '</div>'+
-      '</div>';
-    }).join('');
-
-    list.querySelectorAll('.task-row').forEach(function(row){
-      var id = row.getAttribute('data-id');
-      var input = row.querySelector('input');
-      var btn = row.querySelector('.submit-btn');
-      function submit(){ completeTask(id, input.value); }
-      btn.addEventListener('click', submit);
-      input.addEventListener('keydown', function(e){ if(e.key==="Enter") submit(); });
+        '<div class="task-main"><div class="task-name">'+esc(t.name)+'</div>'+
+        '<div class="task-sub">'+pill(st)+'<span class="nums">Due '+fmt(t.due)+'</span>'+
+        (st==="Overdue" ? '<span class="nums">'+od+(od===1?' day':' days')+' overdue</span>' : '')+
+        '<span>'+(t.freq===1?'Daily':'Every '+t.freq+' days')+'</span></div></div>'+
+        '<div class="entry-form"><input type="text" placeholder="'+ph+'" aria-label="'+ph+' for '+esc(t.name)+'">'+
+        '<button class="btn btn-primary submit-btn">Submit</button></div></div>';
+    }).join("");
+    Array.prototype.forEach.call(list.querySelectorAll(".task-row"), function(row){
+      var id = row.getAttribute("data-id");
+      var input = row.querySelector("input");
+      var go = function(){ completeTask(id, input.value); };
+      row.querySelector(".submit-btn").addEventListener("click", go);
+      input.addEventListener("keydown", function(e){ if(e.key==="Enter") go(); });
     });
   }
 
-  function completeTask(id, raw){
-    var t = state.tasks.find(function(x){ return x.id===id; });
-    if(!t) return;
-    var entry = String(raw||"").trim();
-    if(!entry){ toast('warn','Nothing entered','Type a value before submitting.'); return; }
+  function esc(s){ return String(s).replace(/[&<>"]/g,function(c){
+    return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]; }); }
+  var DASH = '<span style="color:var(--fg-dim)">—</span>';
 
-    // auto-uppercase DONE, same as the real script
-    if(entry.toUpperCase()==="DONE") entry = "DONE";
-
-    if(t.ticket && entry==="DONE"){
-      toast('bad','⚠ Update not saved','This task requires a Ticket ID, not DONE.');
-      return;
-    }
-
-    t.lastCompleted = new Date(TODAY);
-    t.completedBy = state.selectedEmployee;
-    t.ticketProof = t.ticket ? entry : "Daily update confirmed";
-    t.due = addDays(TODAY, t.freq);
-    t.alertSent = null; t.mgrAck = false; t.ackDate = null; t.escalated = null;
-
-    pushLog('complete', t.id, t.name, state.selectedEmployee,
-      t.ticket ? "Ticket "+t.ticketProof+" logged by "+state.selectedEmployee : "Daily update confirmed by "+state.selectedEmployee);
-    toast('ok','✅ Saved', t.id+' marked complete. Next cycle: '+fmt(t.due)+'.');
-    renderAll();
+  function renderTaskMaster(){
+    document.getElementById("tmBody").innerHTML = state.tasks.map(function(t){
+      return '<tr>'+
+        '<td class="nums tname">'+esc(t.id)+'</td>'+
+        '<td>'+esc(t.name)+'</td>'+
+        '<td>'+esc(t.employee)+'</td>'+
+        '<td class="nums">'+t.freq+'</td>'+
+        '<td>'+(t.ticket?'Yes':'No')+'</td>'+
+        '<td class="nums">'+(fmt(t.cycleStart)||DASH)+'</td>'+
+        '<td class="nums">'+(t.lastCompleted?fmt(t.lastCompleted):DASH)+'</td>'+
+        '<td>'+(t.completedBy?esc(t.completedBy):DASH)+'</td>'+
+        '<td>'+(t.ticketProof?esc(t.ticketProof):DASH)+'</td>'+
+        '<td class="nums">'+fmt(t.due)+'</td>'+
+        '<td>'+pill(status(t))+'</td>'+
+        '<td class="nums">'+daysOverdue(t)+'</td>'+
+        '<td class="nums">'+(t.alertSent?fmt(t.alertSent):DASH)+'</td>'+
+        '<td style="text-align:center">'+(t.mgrAck?'☑':'☐')+'</td>'+
+        '<td class="nums">'+(t.ackDate?fmt(t.ackDate):DASH)+'</td>'+
+        '<td class="nums">'+(t.escalated?'<span class="esc">'+fmt(t.escalated)+'</span>':DASH)+'</td>'+
+      '</tr>';
+    }).join("");
+    document.getElementById("tmCount").textContent = state.tasks.length+" tasks";
   }
 
   function renderManagerPanel(){
-    var body = document.getElementById('mgrBody');
-    var rows = state.tasks.slice().sort(function(a,b){ return a.due-b.due; });
-    document.getElementById('mgrMeta').textContent = rows.length+' tasks tracked';
-    var dash = '<span style="color:var(--fg-dim)">—</span>';
-    body.innerHTML = rows.map(function(t){
-      var st = status(t);
-      var disabled = (st==="Upcoming") ? 'disabled' : '';
+    var rows = state.tasks.slice().sort(function(a,b){ return parseDate(a.due)-parseDate(b.due); });
+    document.getElementById("mgrMeta").textContent = rows.length+" tasks tracked";
+    document.getElementById("mgrBody").innerHTML = rows.map(function(t){
+      var st = status(t), od = daysOverdue(t);
       return '<tr data-id="'+t.id+'">'+
-        '<td class="nums tname">'+t.id+'</td>'+
-        '<td>'+t.name+'</td>'+
-        '<td>'+t.employee+'</td>'+
+        '<td class="nums tname">'+esc(t.id)+'</td>'+
+        '<td>'+esc(t.name)+'</td>'+
+        '<td>'+esc(t.employee)+'</td>'+
         '<td class="nums">'+fmt(t.due)+'</td>'+
         '<td>'+pill(st)+'</td>'+
-        '<td class="nums">'+(daysOverdue(t) ? daysOverdue(t) : dash)+'</td>'+
-        '<td class="nums">'+(t.alertSent?fmt(t.alertSent):dash)+'</td>'+
-        '<td style="text-align:center"><input type="checkbox" class="chk" '+(t.mgrAck?'checked':'')+' '+disabled+'></td>'+
-        '<td class="nums">'+(t.ackDate?fmt(t.ackDate):dash)+'</td>'+
-        '<td class="nums">'+(t.escalated?'<span class="esc">'+fmt(t.escalated)+'</span>':dash)+'</td>'+
+        '<td class="nums">'+(od?od:DASH)+'</td>'+
+        '<td class="nums">'+(t.alertSent?fmt(t.alertSent):DASH)+'</td>'+
+        '<td style="text-align:center"><input type="checkbox" class="chk" '+(t.mgrAck?"checked":"")+
+          (st==="Upcoming"?" disabled":"")+'></td>'+
+        '<td class="nums">'+(t.ackDate?fmt(t.ackDate):DASH)+'</td>'+
+        '<td class="nums">'+(t.escalated?'<span class="esc">'+fmt(t.escalated)+'</span>':DASH)+'</td>'+
       '</tr>';
-    }).join('');
-    body.querySelectorAll('.chk').forEach(function(cb){
-      cb.addEventListener('change', function(){
-        var id = cb.closest('tr').getAttribute('data-id');
-        var t = state.tasks.find(function(x){ return x.id===id; });
-        if(cb.checked && !t.mgrAck){
-          t.mgrAck = true; t.ackDate = new Date(TODAY);
-          pushLog('ack', t.id, t.name, t.employee, 'Manager ticked Acknowledged on the dashboard. 72-hour unresolved ceiling still applies.');
-          toast('ok','Acknowledged', t.id+' acknowledged by manager.');
-        }
+    }).join("");
+    Array.prototype.forEach.call(document.querySelectorAll("#mgrBody .chk"), function(cb){
+      cb.addEventListener("change", function(){
+        if(cb.checked) acknowledge(cb.closest("tr").getAttribute("data-id"));
       });
     });
   }
 
-  function renderTaskMaster(){
-    var body = document.getElementById('tmBody');
-    var dash = '<span style="color:var(--fg-dim)">—</span>';
-    body.innerHTML = state.tasks.map(function(t){
-      return '<tr>'+
-        '<td class="nums tname">'+t.id+'</td>'+
-        '<td>'+t.name+'</td>'+
-        '<td>'+t.employee+'</td>'+
-        '<td class="nums">'+t.freq+'</td>'+
-        '<td>'+(t.ticket?'Yes':'No')+'</td>'+
-        '<td class="nums">'+fmt(t.cycleStart)+'</td>'+
-        '<td class="nums">'+(t.lastCompleted?fmt(t.lastCompleted):dash)+'</td>'+
-        '<td>'+(t.completedBy||dash)+'</td>'+
-        '<td>'+(t.ticketProof||dash)+'</td>'+
-        '<td class="nums">'+fmt(t.due)+'</td>'+
-        '<td>'+pill(status(t))+'</td>'+
-        '<td class="nums">'+daysOverdue(t)+'</td>'+
-        '<td class="nums">'+(t.alertSent?fmt(t.alertSent):dash)+'</td>'+
-        '<td style="text-align:center">'+(t.mgrAck?'☑':'☐')+'</td>'+
-        '<td class="nums">'+(t.ackDate?fmt(t.ackDate):dash)+'</td>'+
-        '<td class="nums">'+(t.escalated?'<span class="esc">'+fmt(t.escalated)+'</span>':dash)+'</td>'+
-      '</tr>';
-    }).join('');
-    document.getElementById('tmCount').textContent = state.tasks.length+' tasks';
-  }
-
-  function nextTaskId(){
-    var max = 0;
-    state.tasks.forEach(function(t){
-      var n = parseInt(String(t.id).replace(/\D/g,''),10);
-      if(!isNaN(n) && n > max) max = n;
-    });
-    return "TASK-" + String(max+1).padStart(3,"0");
-  }
-
-  function addTask(){
-    var name = document.getElementById('f-name').value.trim();
-    var emp = document.getElementById('f-emp').value;
-    var freq = parseInt(document.getElementById('f-freq').value,10);
-    var ticket = document.getElementById('f-ticket').value === "yes";
-    var startStr = document.getElementById('f-start').value;
-
-    if(!name){ toast('bad','Task name required','Give the task a name before creating it.'); return; }
-    if(isNaN(freq) || freq < 1){ toast('bad','Invalid frequency','Frequency must be at least 1 day.'); return; }
-    if(!startStr){ toast('bad','Cycle start required','Pick the date this task’s first cycle begins.'); return; }
-
-    var parts = startStr.split('-');
-    var start = new Date(+parts[0], +parts[1]-1, +parts[2]);
-    var id = nextTaskId();
-
-    state.tasks.push({
-      id:id, name:name, employee:emp, freq:freq, ticket:ticket,
-      due:new Date(start), cycleStart:new Date(start),
-      lastCompleted:null, completedBy:null, ticketProof:null,
-      alertSent:null, mgrAck:false, ackDate:null, escalated:null
-    });
-
-    pushLog('created', id, name, emp,
-      'Task created by the owner — '+(freq===1?'daily':'every '+freq+' days')+', '+
-      (ticket?'ticket ID required':'DONE confirmation only')+', first cycle starts '+fmt(start)+'.');
-    toast('ok','Task created', id+' — '+name+', assigned to '+emp+'.');
-
-    document.getElementById('f-name').value = '';
-    document.getElementById('addFormCard').hidden = true;
-    renderAll();
-  }
-
   function renderLog(){
-    var list = document.getElementById('logList');
-    if(state.log.length===0){ list.innerHTML = '<div class="empty"><b>No events yet</b>Complete a task, run the daily check, or acknowledge something to see entries here.</div>'; return; }
-    var typeClass = {complete:'t-complete',alert:'t-alert',escalate:'t-escalate',ack:'t-ack',created:'t-create'};
-    var typeLabel = {complete:'Task Completed',alert:'Manager Alert Sent',escalate:'Leadership Escalation',ack:'Manager Acknowledged',created:'Task Created'};
+    var list = document.getElementById("logList");
+    if(state.log.length===0){
+      list.innerHTML = '<div class="empty"><b>No events yet</b>Complete a task, run the daily check, or acknowledge something to see entries here.</div>';
+      return;
+    }
+    var cls = {complete:"t-complete",alert:"t-alert",escalate:"t-escalate",ack:"t-ack",created:"t-create"};
     list.innerHTML = state.log.map(function(e){
+      var d = e.time instanceof Date && !isNaN(e.time) ? e.time : new Date();
       return '<div class="log-row">'+
-        '<div class="log-time nums">'+e.time.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})+'</div>'+
-        '<div><div class="log-type '+typeClass[e.type]+'">'+typeLabel[e.type]+' · '+e.taskId+'</div>'+
-        '<div class="log-detail">'+e.detail+'</div></div>'+
-      '</div>';
-    }).join('');
+        '<div class="log-time nums">'+d.toLocaleDateString('en-GB',{day:'2-digit',month:'short'})+
+        ' '+d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})+'</div>'+
+        '<div><div class="log-type '+(cls[e.type]||"t-ack")+'">'+esc(e.label||"Event")+' · '+esc(e.taskId)+'</div>'+
+        '<div class="log-detail">'+esc(e.detail)+'</div></div></div>';
+    }).join("");
   }
 
   function renderInbox(){
-    var list = document.getElementById('inboxList');
-    document.getElementById('inboxCount').textContent = state.inbox.length ? '('+state.inbox.length+')' : '';
-    if(state.inbox.length===0){ list.innerHTML = '<div class="inbox-empty">No emails sent yet. Run the daily check to simulate one.</div>'; return; }
+    var list = document.getElementById("inboxList");
+    document.getElementById("inboxCount").textContent = state.inbox.length ? "("+state.inbox.length+")" : "";
+    if(state.inbox.length===0){
+      list.innerHTML = '<div class="empty"><b>No emails yet</b>Run the daily check to see what would be sent.</div>';
+      return;
+    }
     list.innerHTML = state.inbox.map(function(m){
-      var ic = m.kind==='escalate' ? '!' : '●';
-      return '<div class="mail '+m.kind+'">'+
-        '<div class="ic">'+ic+'</div>'+
-        '<div class="body"><div class="to">To: '+m.to+'</div>'+
-        '<div class="subj">'+m.subject+'</div>'+
-        '<div class="snippet">'+m.snippet+'</div></div>'+
-      '</div>';
-    }).join('');
-  }
-
-  function runDailyCheck(){
-    var sentAny = false;
-    state.tasks.forEach(function(t){
-      var st = status(t);
-      if(st!=="Overdue" && st!=="Due Today") return;
-      if(!t.alertSent){
-        t.alertSent = new Date(TODAY);
-        pushLog('alert', t.id, t.name, t.employee, 'Automated email sent to the manager — same day task became due/overdue.');
-        pushMail('alert','manager@allo-innoware.example', '[Allo Innoware] Pending task: '+t.name+' ('+t.employee+')',
-          t.id+' — '+t.name+', assigned to '+t.employee+', was due '+fmt(t.due)+' and is not yet marked complete.');
-        sentAny = true;
-        return;
-      }
-      if(t.escalated) return;
-      var hoursSinceAlert = (TODAY - t.alertSent)/36e5;
-      var hoursSinceDue = (TODAY - stripTime(t.due))/36e5;
-      var noAck = !t.mgrAck && hoursSinceAlert >= 24;
-      var tooLong = hoursSinceDue >= 72;
-      if(noAck || tooLong){
-        t.escalated = new Date(TODAY);
-        var reason = noAck ? 'No manager acknowledgment within the 24-hour window.' :
-          'Task still unresolved '+Math.floor(hoursSinceDue)+' hours after due date, regardless of acknowledgment.';
-        pushLog('escalate', t.id, t.name, t.employee, 'Escalated to leadership. '+reason);
-        pushMail('escalate','leadership@allo-innoware.example', '[Allo Innoware] ESCALATION: '+t.name+' ('+t.employee+') unresolved',
-          t.id+' — '+t.name+' remains unresolved. '+reason);
-        sentAny = true;
-      }
-    });
-    renderAll();
-    toast(sentAny?'warn':'ok', sentAny?'Daily check complete':'Daily check complete', sentAny ? 'New emails are in the Simulated Inbox tab.' : 'Nothing needed an alert or escalation right now.');
-    if(sentAny) switchTab('inbox');
+      return '<div class="mail '+m.kind+'"><div class="ic">'+(m.kind==="escalate"?"!":"●")+'</div>'+
+        '<div class="body"><div class="to">To: '+esc(m.to)+'</div>'+
+        '<div class="subj">'+esc(m.subject)+'</div>'+
+        '<div class="snippet">'+esc(m.snippet)+'</div></div></div>';
+    }).join("");
   }
 
   function renderAll(){ renderTaskMaster(); renderEmployeePanel(); renderManagerPanel(); renderLog(); renderInbox(); }
 
   // ---------- tabs ----------
   function switchTab(name){
-    document.querySelectorAll('.tab').forEach(function(b){ b.setAttribute('aria-selected', b.dataset.tab===name ? 'true':'false'); });
-    ['taskmaster','employee','manager','log','inbox'].forEach(function(n){
-      document.getElementById('panel-'+n).hidden = (n!==name);
+    Array.prototype.forEach.call(document.querySelectorAll(".tab"), function(b){
+      b.setAttribute("aria-selected", b.dataset.tab===name ? "true":"false");
+    });
+    ["taskmaster","employee","manager","log","inbox"].forEach(function(n){
+      document.getElementById("panel-"+n).hidden = (n!==name);
     });
   }
-  document.querySelectorAll('.tab').forEach(function(b){ b.addEventListener('click', function(){ switchTab(b.dataset.tab); }); });
+  Array.prototype.forEach.call(document.querySelectorAll(".tab"), function(b){
+    b.addEventListener("click", function(){ switchTab(b.dataset.tab); });
+  });
 
-  document.getElementById('empSelect').addEventListener('change', function(e){
+  // ---------- wiring ----------
+  document.getElementById("empSelect").addEventListener("change", function(e){
     state.selectedEmployee = e.target.value; renderEmployeePanel();
   });
-  document.getElementById('runCheckBtn').addEventListener('click', runDailyCheck);
-  document.getElementById('resetBtn').addEventListener('click', function(){
-    state.tasks = seedTasks(); state.log = []; state.inbox = [];
-    toast('ok','Reset','Demo data restored to its starting scenario.');
-    renderAll();
+  document.getElementById("runCheckBtn").addEventListener("click", runDailyCheck);
+  document.getElementById("refreshBtn").addEventListener("click", refresh);
+
+  document.getElementById("addToggle").addEventListener("click", function(){
+    var card = document.getElementById("addFormCard");
+    card.hidden = !card.hidden;
+    if(!card.hidden) document.getElementById("f-name").focus();
+  });
+  document.getElementById("addCancel").addEventListener("click", function(){
+    document.getElementById("addFormCard").hidden = true;
+  });
+  document.getElementById("addSave").addEventListener("click", addTask);
+  document.getElementById("f-name").addEventListener("keydown", function(e){ if(e.key==="Enter") addTask(); });
+
+  var scrim = document.getElementById("connectScrim");
+  document.getElementById("connectBtn").addEventListener("click", function(){
+    document.getElementById("endpointInput").value = state.endpoint || "";
+    scrim.hidden = false;
+    document.getElementById("endpointInput").focus();
+  });
+  document.getElementById("connectCancel").addEventListener("click", function(){ scrim.hidden = true; });
+  scrim.addEventListener("click", function(e){ if(e.target===scrim) scrim.hidden = true; });
+  document.addEventListener("keydown", function(e){ if(e.key==="Escape") scrim.hidden = true; });
+  document.getElementById("connectDemo").addEventListener("click", function(){
+    scrim.hidden = true; goDemo(); toast("ok","Demo data","Running on the built-in sample scenario.");
+  });
+  document.getElementById("connectSave").addEventListener("click", function(){
+    var url = document.getElementById("endpointInput").value.trim();
+    if(!/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec$/.test(url)){
+      toast("bad","That doesn't look right","The URL should start with https://script.google.com/macros/s/ and end in /exec.");
+      return;
+    }
+    scrim.hidden = true;
+    goLive(url).catch(function(){});
   });
 
-  // ---------- add-task form wiring ----------
-  (function(){
-    var empSel = document.getElementById('f-emp');
-    empSel.innerHTML = EMPLOYEES.map(function(e){ return '<option value="'+e+'">'+e+'</option>'; }).join('');
-    var d = TODAY;
-    document.getElementById('f-start').value =
-      d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
-
-    document.getElementById('addToggle').addEventListener('click', function(){
-      var card = document.getElementById('addFormCard');
-      card.hidden = !card.hidden;
-      if(!card.hidden) document.getElementById('f-name').focus();
-    });
-    document.getElementById('addCancel').addEventListener('click', function(){
-      document.getElementById('addFormCard').hidden = true;
-    });
-    document.getElementById('addSave').addEventListener('click', addTask);
-    document.getElementById('f-name').addEventListener('keydown', function(e){ if(e.key==="Enter") addTask(); });
-  })();
-
   // ---------- boot ----------
-  state.tasks = seedTasks();
-  renderEmpSelect();
-  renderAll();
+  (function init(){
+    var d = DEMO_TODAY;
+    document.getElementById("f-start").value =
+      d.getFullYear()+"-"+("0"+(d.getMonth()+1)).slice(-2)+"-"+("0"+d.getDate()).slice(-2);
+
+    var saved = null;
+    try{ saved = localStorage.getItem(STORE_KEY); }catch(e){}
+
+    state.tasks = seedTasks();
+    renderMode(); renderEmpSelect(); renderAll();
+
+    if(saved){
+      goLive(saved).catch(function(){
+        toast("warn","Showing demo data","Saved sheet connection could not be reached.");
+      });
+    }
+  })();
 })();
 </script>
 
