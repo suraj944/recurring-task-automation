@@ -106,6 +106,9 @@
   .task-row:last-child{border-bottom:none}
   .task-main{min-width:0}
   .task-name{font-weight:600;font-size:14px}
+  .tid{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.02em;color:var(--fg-dim);
+    font-variant-numeric:tabular-nums;background:var(--surface-2);border:1px solid var(--border);
+    padding:2px 7px;border-radius:6px;margin-right:9px;vertical-align:1px}
   .task-sub{font-size:12px;color:var(--fg-dim);margin-top:2px;display:flex;gap:8px;flex-wrap:wrap}
   .pill{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:700;letter-spacing:.02em;
     padding:3px 9px;border-radius:99px;white-space:nowrap}
@@ -690,7 +693,7 @@
       : '<span class="mode demo"><span class="mode-dot"></span>Demo data — not connected</span>';
     document.getElementById("todayLabel").textContent = fmt(today());
     document.getElementById("connectBtn").textContent = live ? "⚙ Sheet settings" : "⚙ Connect to sheet";
-    document.getElementById("refreshBtn").textContent = live ? "↻ Refresh" : "↺ Reset demo data";
+    document.getElementById("refreshBtn").textContent = "↻ Refresh";
     document.getElementById("inboxTab").hidden = live;
     if(live && document.getElementById("panel-inbox").hidden === false) switchTab("log");
     document.getElementById("tmNote").textContent = live
@@ -721,7 +724,7 @@
       var ph = t.ticket ? "Enter Ticket ID" : "Type DONE";
       var od = daysOverdue(t);
       return '<div class="task-row" data-id="'+t.id+'">'+
-        '<div class="task-main"><div class="task-name">'+esc(t.name)+'</div>'+
+        '<div class="task-main"><div class="task-name"><span class="tid">'+esc(t.id)+'</span>'+esc(t.name)+'</div>'+
         '<div class="task-sub">'+pill(st)+'<span class="nums">Due '+fmt(t.due)+'</span>'+
         (st==="Overdue" ? '<span class="nums">'+od+(od===1?' day':' days')+' overdue</span>' : '')+
         '<span>'+(t.freq===1?'Daily':'Every '+t.freq+' days')+'</span></div></div>'+
