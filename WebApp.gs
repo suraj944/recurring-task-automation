@@ -64,7 +64,7 @@ function setupTriggers() {
 
   PropertiesService.getScriptProperties().setProperty('AUTOMATION_LIVE', 'true');
 
-  SpreadsheetApp.getUi().alert(
+  const summary =
     'Automation is live, running with YOUR authorisation:\n\n' +
     '• Employees type into Employee Pending View and the script updates ' +
     'Task Master on their behalf, even though that tab is locked to them.\n' +
@@ -73,8 +73,18 @@ function setupTriggers() {
     '(set in SLA Settings B7), sending manager alerts and leadership ' +
     'escalations with nobody pressing anything.\n\n' +
     'Re-run this after changing the check-run time, or if automation ever ' +
-    'seems to stop.'
-  );
+    'seems to stop.';
+
+  // getUi() only exists when this runs from the spreadsheet. Run from the
+  // Apps Script editor it throws, which would look like the setup failed
+  // even though every trigger above was created. Log instead.
+  try {
+    SpreadsheetApp.getUi().alert(summary);
+  } catch (err) {
+    Logger.log(summary);
+  }
+
+  return { ok: true, triggers: ScriptApp.getProjectTriggers().length };
 }
 
 /* ========================================================================
