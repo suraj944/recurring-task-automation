@@ -1,0 +1,656 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Interactive demo of a recurring task tracking, pending report and escalation automation system built on Google Sheets and Apps Script.">
+<style>
+  :root{color-scheme:light}
+  html,body{margin:0}
+  body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;font-size:14px}
+  img{max-width:100%}
+  [hidden]{display:none!important}
+</style>
+<title>Recurring Task Automation</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap">
+<style>
+  /* Layout: fixed top bar (brand + Run Daily Check + simulated clock),
+     tab strip below it, single scrolling content pane per tab. */
+  :root{
+    --bg:#f4f6fb; --surface:#ffffff; --surface-2:#eef1f8; --border:#dde2ee;
+    --fg:#141a2e; --fg-dim:#5b6479; --accent:#2f5fff; --accent-fg:#ffffff;
+    --ok:#1a9e5c; --ok-bg:#e4f7ec; --warn:#b3770a; --warn-bg:#fdf1d9;
+    --bad:#c22b3e; --bad-bg:#fbe4e7; --shadow:0 1px 2px rgba(20,26,46,.06),0 8px 24px -12px rgba(20,26,46,.12);
+    --font-display:"Space Grotesk",Inter,system-ui,sans-serif;
+    --font-body:"Inter",system-ui,sans-serif;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#0f1320; --surface:#171d30; --surface-2:#1e2540; --border:#2a3151;
+      --fg:#e8ebf5; --fg-dim:#9aa3bf; --accent:#6d8dff; --accent-fg:#0f1320;
+      --ok:#39d98a; --ok-bg:#103824; --warn:#f0b541; --warn-bg:#3a2d0d;
+      --bad:#ff6b7f; --bad-bg:#3a141c; --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 24px -12px rgba(0,0,0,.5);
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#0f1320; --surface:#171d30; --surface-2:#1e2540; --border:#2a3151;
+    --fg:#e8ebf5; --fg-dim:#9aa3bf; --accent:#6d8dff; --accent-fg:#0f1320;
+    --ok:#39d98a; --ok-bg:#103824; --warn:#f0b541; --warn-bg:#3a2d0d;
+    --bad:#ff6b7f; --bad-bg:#3a141c; --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 24px -12px rgba(0,0,0,.5);
+    color-scheme: dark;
+  }
+  *{box-sizing:border-box}
+  body{background:var(--bg);color:var(--fg);font-family:var(--font-body);min-height:100%}
+  h1,h2,h3{font-family:var(--font-display);margin:0;text-wrap:balance}
+  button{font-family:inherit}
+  .nums{font-variant-numeric:tabular-nums}
+
+  .shell{max-width:1040px;margin:0 auto;padding-inline:max(16px,env(safe-area-inset-left,0px)) ;padding-bottom:48px}
+  .shell{padding-right:max(16px,env(safe-area-inset-right,0px))}
+
+  .topbar{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;background:var(--bg);
+    padding-top:18px;padding-bottom:12px;border-bottom:1px solid var(--border)}
+  .brand-row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+  .brand{display:flex;align-items:center;gap:10px}
+  .brand .mark{width:34px;height:34px;border-radius:9px;background:var(--accent);color:var(--accent-fg);
+    display:flex;align-items:center;justify-content:center;font-family:var(--font-display);font-weight:700;font-size:15px;flex:none}
+  .brand h1{font-size:17px}
+  .brand .sub{font-size:12px;color:var(--fg-dim)}
+  .clock{font-size:12px;color:var(--fg-dim);text-align:right}
+  .clock b{color:var(--fg);font-weight:600}
+
+  .controls-row{display:flex;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap}
+  .btn{appearance:none;border:1px solid var(--border);background:var(--surface);color:var(--fg);
+    font-weight:600;font-size:13px;padding:9px 14px;border-radius:9px;cursor:pointer;display:inline-flex;align-items:center;gap:7px;
+    transition:transform .08s ease, background .15s ease; box-shadow:var(--shadow)}
+  .btn:hover{transform:translateY(-1px)}
+  .btn:active{transform:translateY(0)}
+  .btn-primary{background:var(--accent);color:var(--accent-fg);border-color:transparent}
+  .btn-ghost{background:transparent;box-shadow:none}
+  .btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .btn[disabled]{opacity:.5;cursor:not-allowed;transform:none}
+
+  .tabs{display:flex;gap:4px;margin-top:14px;border-bottom:1px solid var(--border);overflow-x:auto}
+  .tab{appearance:none;border:none;background:transparent;color:var(--fg-dim);font-weight:600;font-size:13.5px;
+    padding:9px 4px;margin-right:18px;cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap}
+  .tab[aria-selected="true"]{color:var(--fg);border-color:var(--accent)}
+  .tab:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+  .panel{padding-top:20px}
+  .panel[hidden]{display:none!important}
+
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow)}
+  .section-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:10px;flex-wrap:wrap}
+  .section-head h2{font-size:15px}
+  .section-head .meta{font-size:12px;color:var(--fg-dim)}
+
+  select{appearance:none;border:1px solid var(--border);background:var(--surface);color:var(--fg);
+    font-weight:600;font-size:13px;padding:8px 32px 8px 12px;border-radius:9px;cursor:pointer;
+    background-image:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="10" height="6"><path d="M1 1l4 4 4-4" stroke="%235b6479" stroke-width="1.6" fill="none"/></svg>');
+    background-repeat:no-repeat;background-position:right 12px center}
+
+  .task-row{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;padding:14px 16px;
+    border-bottom:1px solid var(--border)}
+  .task-row:last-child{border-bottom:none}
+  .task-main{min-width:0}
+  .task-name{font-weight:600;font-size:14px}
+  .task-sub{font-size:12px;color:var(--fg-dim);margin-top:2px;display:flex;gap:8px;flex-wrap:wrap}
+  .pill{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:700;letter-spacing:.02em;
+    padding:3px 9px;border-radius:99px;white-space:nowrap}
+  .pill-bad{background:var(--bad-bg);color:var(--bad)}
+  .pill-warn{background:var(--warn-bg);color:var(--warn)}
+  .pill-ok{background:var(--ok-bg);color:var(--ok)}
+  .pill-dot{width:6px;height:6px;border-radius:50%;background:currentColor;flex:none}
+
+  .entry-form{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+  .entry-form input{border:1px solid var(--border);background:var(--surface-2);color:var(--fg);
+    font-size:13px;padding:8px 10px;border-radius:8px;width:170px;min-width:0}
+  .entry-form input::placeholder{color:var(--fg-dim)}
+  .entry-form input:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+
+  .empty{padding:36px 16px;text-align:center;color:var(--fg-dim);font-size:13.5px}
+  .empty b{display:block;color:var(--fg);font-size:14px;margin-bottom:4px}
+
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{text-align:left;font-size:11.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--fg-dim);
+    font-weight:700;padding:10px 14px;border-bottom:1px solid var(--border);white-space:nowrap}
+  td{padding:11px 14px;border-bottom:1px solid var(--border);vertical-align:middle}
+  tr:last-child td{border-bottom:none}
+  .tname{font-weight:600}
+  .tsub{color:var(--fg-dim);font-size:11.5px}
+  .table-wrap{overflow-x:auto}
+  .chk{width:17px;height:17px;accent-color:var(--accent);cursor:pointer}
+  .chk[disabled]{cursor:not-allowed}
+
+  .log-row{display:grid;grid-template-columns:auto 1fr;gap:14px;padding:12px 16px;border-bottom:1px solid var(--border)}
+  .log-row:last-child{border-bottom:none}
+  .log-time{font-size:11.5px;color:var(--fg-dim);white-space:nowrap;padding-top:2px}
+  .log-type{font-size:12.5px;font-weight:700;margin-bottom:2px}
+  .log-detail{font-size:12.5px;color:var(--fg-dim)}
+  .log-type.t-complete{color:var(--ok)}
+  .log-type.t-alert{color:var(--warn)}
+  .log-type.t-escalate{color:var(--bad)}
+  .log-type.t-ack{color:var(--accent)}
+
+  .inbox-empty{padding:28px 16px;text-align:center;color:var(--fg-dim);font-size:13px}
+  .mail{padding:13px 16px;border-bottom:1px solid var(--border);display:flex;gap:11px}
+  .mail:last-child{border-bottom:none}
+  .mail .ic{width:30px;height:30px;border-radius:8px;flex:none;display:flex;align-items:center;justify-content:center;
+    font-size:14px;font-weight:700}
+  .mail.alert .ic{background:var(--warn-bg);color:var(--warn)}
+  .mail.escalate .ic{background:var(--bad-bg);color:var(--bad)}
+  .mail .body{min-width:0}
+  .mail .to{font-size:11px;color:var(--fg-dim)}
+  .mail .subj{font-size:13px;font-weight:600;margin:1px 0 2px}
+  .mail .snippet{font-size:12px;color:var(--fg-dim)}
+
+  .toast-stack{position:fixed;left:50%;bottom:max(22px,env(safe-area-inset-bottom,0px));transform:translateX(-50%);
+    display:flex;flex-direction:column;gap:8px;z-index:50;width:min(92vw,360px)}
+  .toast{background:var(--surface);border:1px solid var(--border);box-shadow:var(--shadow);border-radius:11px;
+    padding:11px 14px;font-size:13px;display:flex;gap:9px;align-items:flex-start;animation:toastIn .18s ease}
+  .toast b{display:block;font-size:12px;margin-bottom:1px}
+  .toast.ok{border-left:3px solid var(--ok)}
+  .toast.warn{border-left:3px solid var(--warn)}
+  .toast.bad{border-left:3px solid var(--bad)}
+  @keyframes toastIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+  .note{font-size:12px;color:var(--fg-dim);line-height:1.5;margin-top:14px;padding:12px 14px;
+    background:var(--surface-2);border-radius:10px;border:1px solid var(--border)}
+
+  @media (max-width:560px){
+    .task-row{grid-template-columns:1fr}
+    .entry-form{justify-content:flex-start}
+    .entry-form input{width:100%}
+  }
+  .mgr-table td,.mgr-table th{white-space:nowrap}
+  .esc{color:var(--bad);font-weight:700}
+  .lock-pill{display:inline-flex;align-items:center;gap:4px;font-size:10.5px;font-weight:700;letter-spacing:.03em;
+    padding:3px 8px;border-radius:99px;background:var(--surface-2);color:var(--fg-dim);
+    border:1px solid var(--border);vertical-align:middle;margin-left:6px;font-family:var(--font-body)}
+  .tm-table td,.tm-table th{white-space:nowrap}
+  .addform-card{margin-bottom:4px}
+  .addform{display:grid;grid-template-columns:repeat(auto-fit,minmax(158px,1fr));gap:12px;padding:16px}
+  .addform label{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.04em;
+    font-weight:700;color:var(--fg-dim);margin-bottom:5px}
+  .addform input,.addform select{width:100%;border:1px solid var(--border);background:var(--surface-2);
+    color:var(--fg);font-size:13px;padding:8px 10px;border-radius:8px;font-family:inherit}
+  .addform select{padding-right:30px}
+  .addform input:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+  .addform .actions{display:flex;gap:8px;align-items:flex-end}
+  .addform-note{padding:0 16px 14px;font-size:11.5px;color:var(--fg-dim)}
+  .log-type.t-create{color:var(--accent)}
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="topbar">
+    <div class="brand-row">
+      <div class="brand">
+        <div class="mark">AI</div>
+        <div>
+          <h1>Recurring Task Automation</h1>
+          <div class="sub">Interactive demo · mock data, not connected to the live Google Sheet</div>
+        </div>
+      </div>
+      <div class="clock">Simulated "today"<br><b class="nums" id="todayLabel"></b></div>
+    </div>
+    <div class="controls-row">
+      <button class="btn btn-primary" id="runCheckBtn">▶ Run daily check now</button>
+      <button class="btn btn-ghost" id="resetBtn">↺ Reset demo data</button>
+      <span style="font-size:12px;color:var(--fg-dim)" id="checkHint">Sends manager alerts + leadership escalations for anything overdue, same as the real script.</span>
+    </div>
+    <div class="tabs" role="tablist">
+      <button class="tab" role="tab" aria-selected="false" data-tab="taskmaster">Task Master 🔒</button>
+      <button class="tab" role="tab" aria-selected="true" data-tab="employee">Employee Pending View</button>
+      <button class="tab" role="tab" aria-selected="false" data-tab="manager">Manager Dashboard</button>
+      <button class="tab" role="tab" aria-selected="false" data-tab="log">Escalation Log</button>
+      <button class="tab" role="tab" aria-selected="false" data-tab="inbox">Simulated Inbox <span id="inboxCount" class="nums"></span></button>
+    </div>
+  </div>
+
+  <!-- TASK MASTER -->
+  <section class="panel" id="panel-taskmaster" hidden>
+    <div class="section-head">
+      <h2>Task Master <span class="lock-pill">🔒 Owner only</span></h2>
+      <button class="btn btn-primary" id="addToggle">+ Add task</button>
+    </div>
+    <div class="card addform-card" id="addFormCard" hidden>
+      <div class="addform">
+        <div><label for="f-name">Task name</label><input type="text" id="f-name" placeholder="e.g. Daily Dispatch Log"></div>
+        <div><label for="f-emp">Assigned to</label><select id="f-emp"></select></div>
+        <div><label for="f-freq">Frequency (days)</label><input type="number" id="f-freq" value="1" min="1" max="365"></div>
+        <div><label for="f-ticket">Requires ticket?</label><select id="f-ticket"><option value="no">No — type DONE</option><option value="yes">Yes — needs Ticket ID</option></select></div>
+        <div><label for="f-start">Cycle start date</label><input type="date" id="f-start"></div>
+        <div class="actions">
+          <button class="btn btn-primary" id="addSave">Create task</button>
+          <button class="btn btn-ghost" id="addCancel">Cancel</button>
+        </div>
+      </div>
+      <div class="addform-note">Task ID is generated automatically, so a duplicate can never be created by hand — the same guard the live sheet enforces with data validation on column A.</div>
+    </div>
+    <div class="section-head" style="margin-top:14px">
+      <span class="meta">Single source of truth · every other tab is derived from this</span>
+      <span class="meta" id="tmCount"></span>
+    </div>
+    <div class="card table-wrap">
+      <table class="tm-table">
+        <thead><tr>
+          <th>Task ID</th><th>Task Name</th><th>Assigned To</th><th>Frequency (Days)</th><th>Requires Ticket?</th>
+          <th>Cycle Start Date</th><th>Last Completed Date</th><th>Completed By</th><th>Ticket ID / Proof</th>
+          <th>Next Due Date</th><th>Status</th><th>Days Overdue</th><th>Manager Alert Sent Date</th>
+          <th>Manager Acknowledged</th><th>Acknowledged Date</th><th>Escalated to Leadership Date</th>
+        </tr></thead>
+        <tbody id="tmBody"></tbody>
+      </table>
+    </div>
+    <div class="note">This tab is read-only here because it is read-only in the real sheet — locked to the owner's account, so no employee can edit a Task ID, reassign work, or backdate a completion. Everything you see filled in below (completion dates, alert stamps, escalation stamps) was written by the script, never typed by hand. Scroll sideways to see all 16 columns.</div>
+  </section>
+
+  <!-- EMPLOYEE VIEW -->
+  <section class="panel" id="panel-employee">
+    <div class="section-head">
+      <h2>Your pending tasks</h2>
+      <select id="empSelect"></select>
+    </div>
+    <div class="card" id="empList"></div>
+    <div class="note">Type <b>DONE</b> for a daily task, or a ticket ID for one that requires one, then press Enter. "done" in any case auto-corrects to <b>DONE</b>, and a ticket task rejects a bare DONE — exactly like the real sheet.</div>
+  </section>
+
+  <!-- MANAGER DASHBOARD -->
+  <section class="panel" id="panel-manager" hidden>
+    <div class="section-head">
+      <h2>All tasks</h2>
+      <span class="meta" id="mgrMeta"></span>
+    </div>
+    <div class="card table-wrap">
+      <table class="mgr-table">
+        <thead><tr>
+          <th>Task ID</th><th>Task Name</th><th>Assigned To</th><th>Due Date</th><th>Status</th>
+          <th>Days Overdue</th><th>Alert Sent Date</th><th>Acknowledged?</th><th>Acknowledged Date</th>
+          <th>Escalated to Leadership</th>
+        </tr></thead>
+        <tbody id="mgrBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ESCALATION LOG -->
+  <section class="panel" id="panel-log" hidden>
+    <div class="section-head">
+      <h2>Escalation Log</h2>
+      <span class="meta">Append-only audit trail, newest first</span>
+    </div>
+    <div class="card" id="logList"></div>
+  </section>
+
+  <!-- INBOX -->
+  <section class="panel" id="panel-inbox" hidden>
+    <div class="section-head">
+      <h2>Simulated inbox</h2>
+      <span class="meta">What the manager / leadership would actually receive</span>
+    </div>
+    <div class="card" id="inboxList"></div>
+  </section>
+</div>
+
+<div class="toast-stack" id="toastStack"></div>
+
+<script>
+(function(){
+  "use strict";
+
+  // ---------- virtual clock ----------
+  var TODAY = new Date(2026,10,12); // Nov 12 2026 — matches the real sheet's current state
+  function fmt(d){ if(!d) return ""; var dt=(d instanceof Date)?d:new Date(d);
+    return dt.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'}); }
+  function addDays(d,n){ var r=new Date(d); r.setDate(r.getDate()+n); return r; }
+  function diffDays(a,b){ return Math.round((a-b)/86400000); }
+  document.getElementById('todayLabel').textContent = fmt(TODAY);
+
+  var EMPLOYEES = ["Employee A","Employee B","Employee C","Employee D","Employee E","Employee F"];
+
+  function seedTasks(){
+    return [
+      {id:"TASK-001",name:"Daily Operations Update",employee:"Employee A",freq:1,ticket:false,due:addDays(TODAY,-3)},
+      {id:"TASK-010",name:"Monthly Expense Report",employee:"Employee A",freq:1,ticket:true,due:addDays(TODAY,-3)},
+      {id:"TASK-012",name:"Supplier Payment Ticket",employee:"Employee A",freq:7,ticket:true,due:addDays(TODAY,-5)},
+      {id:"TASK-026",name:"Stock Reconciliation Check",employee:"Employee A",freq:1,ticket:false,due:addDays(TODAY,0)},
+      {id:"TASK-016",name:"Weekly Vendor Call Log",employee:"Employee A",freq:7,ticket:true,due:addDays(TODAY,4)},
+      {id:"TASK-002",name:"Portal Task A",employee:"Employee B",freq:7,ticket:true,due:addDays(TODAY,6)},
+      {id:"TASK-005",name:"Weekly Compliance Check",employee:"Employee B",freq:7,ticket:true,due:addDays(TODAY,-4)},
+      {id:"TASK-009",name:"Vendor Invoice Reconciliation",employee:"Employee C",freq:7,ticket:true,due:addDays(TODAY,-1)},
+      {id:"TASK-011",name:"Daily Standup Update",employee:"Employee D",freq:1,ticket:false,due:addDays(TODAY,0)},
+      {id:"TASK-014",name:"Stock Check",employee:"Employee E",freq:1,ticket:false,due:addDays(TODAY,0)},
+      {id:"TASK-015",name:"Review Video",employee:"Employee F",freq:2,ticket:false,due:addDays(TODAY,1)},
+      {id:"TASK-017",name:"Packaging QA Check",employee:"Employee B",freq:1,ticket:false,due:addDays(TODAY,0)},
+      {id:"TASK-018",name:"Raw Material Reorder",employee:"Employee C",freq:7,ticket:true,due:addDays(TODAY,5)},
+      {id:"TASK-020",name:"Courier Dispatch Log",employee:"Employee E",freq:7,ticket:true,due:addDays(TODAY,-2)}
+    ].map(function(t){
+      return Object.assign(t,{
+        cycleStart:new Date(t.due),
+        lastCompleted:null, completedBy:null, ticketProof:null,
+        alertSent:null, mgrAck:false, ackDate:null, escalated:null
+      });
+    });
+  }
+
+  var state = { tasks:[], log:[], inbox:[], selectedEmployee:"Employee A" };
+
+  function status(t){
+    var d = diffDays(TODAY, stripTime(t.due));
+    if (d > 0) return "Overdue";
+    if (d === 0) return "Due Today";
+    return "Upcoming";
+  }
+  function stripTime(d){ return new Date(d.getFullYear(),d.getMonth(),d.getDate()); }
+  function daysOverdue(t){ var d = diffDays(TODAY, stripTime(t.due)); return Math.max(0,d); }
+
+  function pill(st){
+    if(st==="Overdue") return '<span class="pill pill-bad"><span class="pill-dot"></span>Overdue</span>';
+    if(st==="Due Today") return '<span class="pill pill-warn"><span class="pill-dot"></span>Due Today</span>';
+    return '<span class="pill pill-ok"><span class="pill-dot"></span>Upcoming</span>';
+  }
+
+  function pushLog(type, taskId, taskName, who, detail){
+    state.log.unshift({ time:new Date(TODAY.getTime()+state.log.length*60000), type:type, taskId:taskId, taskName:taskName, who:who, detail:detail });
+    renderLog();
+  }
+  function pushMail(kind, to, subject, snippet){
+    state.inbox.unshift({kind:kind, to:to, subject:subject, snippet:snippet});
+    renderInbox();
+  }
+  function toast(kind, title, msg){
+    var stack = document.getElementById('toastStack');
+    var el = document.createElement('div');
+    el.className = 'toast '+kind;
+    el.innerHTML = '<div><b>'+title+'</b>'+msg+'</div>';
+    stack.appendChild(el);
+    setTimeout(function(){ el.style.transition='opacity .25s ease'; el.style.opacity='0'; setTimeout(function(){ el.remove(); },250); }, 4200);
+  }
+
+  // ---------- rendering ----------
+  function renderEmpSelect(){
+    var sel = document.getElementById('empSelect');
+    sel.innerHTML = EMPLOYEES.map(function(e){ return '<option value="'+e+'">'+e+'</option>'; }).join('');
+    sel.value = state.selectedEmployee;
+  }
+
+  function renderEmployeePanel(){
+    var list = document.getElementById('empList');
+    var mine = state.tasks.filter(function(t){ return t.employee===state.selectedEmployee; })
+      .filter(function(t){ return status(t)!=="done"; })
+      .sort(function(a,b){ return a.due-b.due; });
+
+    if(mine.length===0){
+      list.innerHTML = '<div class="empty"><b>Nothing pending</b>All caught up for '+state.selectedEmployee+'.</div>';
+      return;
+    }
+    list.innerHTML = mine.map(function(t){
+      var st = status(t);
+      var placeholder = t.ticket ? "Enter Ticket ID" : "Type DONE";
+      return '<div class="task-row" data-id="'+t.id+'">'+
+        '<div class="task-main">'+
+          '<div class="task-name">'+t.name+'</div>'+
+          '<div class="task-sub">'+pill(st)+
+            '<span class="nums">Due '+fmt(t.due)+'</span>'+
+            (st==="Overdue" ? '<span class="nums">'+daysOverdue(t)+(daysOverdue(t)===1?' day':' days')+' overdue</span>' : '')+
+            '<span>'+(t.freq===1?'Daily':'Every '+t.freq+' days')+'</span>'+
+          '</div>'+
+        '</div>'+
+        '<div class="entry-form">'+
+          '<input type="text" placeholder="'+placeholder+'" aria-label="'+placeholder+' for '+t.name+'">'+
+          '<button class="btn btn-primary submit-btn">Submit</button>'+
+        '</div>'+
+      '</div>';
+    }).join('');
+
+    list.querySelectorAll('.task-row').forEach(function(row){
+      var id = row.getAttribute('data-id');
+      var input = row.querySelector('input');
+      var btn = row.querySelector('.submit-btn');
+      function submit(){ completeTask(id, input.value); }
+      btn.addEventListener('click', submit);
+      input.addEventListener('keydown', function(e){ if(e.key==="Enter") submit(); });
+    });
+  }
+
+  function completeTask(id, raw){
+    var t = state.tasks.find(function(x){ return x.id===id; });
+    if(!t) return;
+    var entry = String(raw||"").trim();
+    if(!entry){ toast('warn','Nothing entered','Type a value before submitting.'); return; }
+
+    // auto-uppercase DONE, same as the real script
+    if(entry.toUpperCase()==="DONE") entry = "DONE";
+
+    if(t.ticket && entry==="DONE"){
+      toast('bad','⚠ Update not saved','This task requires a Ticket ID, not DONE.');
+      return;
+    }
+
+    t.lastCompleted = new Date(TODAY);
+    t.completedBy = state.selectedEmployee;
+    t.ticketProof = t.ticket ? entry : "Daily update confirmed";
+    t.due = addDays(TODAY, t.freq);
+    t.alertSent = null; t.mgrAck = false; t.ackDate = null; t.escalated = null;
+
+    pushLog('complete', t.id, t.name, state.selectedEmployee,
+      t.ticket ? "Ticket "+t.ticketProof+" logged by "+state.selectedEmployee : "Daily update confirmed by "+state.selectedEmployee);
+    toast('ok','✅ Saved', t.id+' marked complete. Next cycle: '+fmt(t.due)+'.');
+    renderAll();
+  }
+
+  function renderManagerPanel(){
+    var body = document.getElementById('mgrBody');
+    var rows = state.tasks.slice().sort(function(a,b){ return a.due-b.due; });
+    document.getElementById('mgrMeta').textContent = rows.length+' tasks tracked';
+    var dash = '<span style="color:var(--fg-dim)">—</span>';
+    body.innerHTML = rows.map(function(t){
+      var st = status(t);
+      var disabled = (st==="Upcoming") ? 'disabled' : '';
+      return '<tr data-id="'+t.id+'">'+
+        '<td class="nums tname">'+t.id+'</td>'+
+        '<td>'+t.name+'</td>'+
+        '<td>'+t.employee+'</td>'+
+        '<td class="nums">'+fmt(t.due)+'</td>'+
+        '<td>'+pill(st)+'</td>'+
+        '<td class="nums">'+(daysOverdue(t) ? daysOverdue(t) : dash)+'</td>'+
+        '<td class="nums">'+(t.alertSent?fmt(t.alertSent):dash)+'</td>'+
+        '<td style="text-align:center"><input type="checkbox" class="chk" '+(t.mgrAck?'checked':'')+' '+disabled+'></td>'+
+        '<td class="nums">'+(t.ackDate?fmt(t.ackDate):dash)+'</td>'+
+        '<td class="nums">'+(t.escalated?'<span class="esc">'+fmt(t.escalated)+'</span>':dash)+'</td>'+
+      '</tr>';
+    }).join('');
+    body.querySelectorAll('.chk').forEach(function(cb){
+      cb.addEventListener('change', function(){
+        var id = cb.closest('tr').getAttribute('data-id');
+        var t = state.tasks.find(function(x){ return x.id===id; });
+        if(cb.checked && !t.mgrAck){
+          t.mgrAck = true; t.ackDate = new Date(TODAY);
+          pushLog('ack', t.id, t.name, t.employee, 'Manager ticked Acknowledged on the dashboard. 72-hour unresolved ceiling still applies.');
+          toast('ok','Acknowledged', t.id+' acknowledged by manager.');
+        }
+      });
+    });
+  }
+
+  function renderTaskMaster(){
+    var body = document.getElementById('tmBody');
+    var dash = '<span style="color:var(--fg-dim)">—</span>';
+    body.innerHTML = state.tasks.map(function(t){
+      return '<tr>'+
+        '<td class="nums tname">'+t.id+'</td>'+
+        '<td>'+t.name+'</td>'+
+        '<td>'+t.employee+'</td>'+
+        '<td class="nums">'+t.freq+'</td>'+
+        '<td>'+(t.ticket?'Yes':'No')+'</td>'+
+        '<td class="nums">'+fmt(t.cycleStart)+'</td>'+
+        '<td class="nums">'+(t.lastCompleted?fmt(t.lastCompleted):dash)+'</td>'+
+        '<td>'+(t.completedBy||dash)+'</td>'+
+        '<td>'+(t.ticketProof||dash)+'</td>'+
+        '<td class="nums">'+fmt(t.due)+'</td>'+
+        '<td>'+pill(status(t))+'</td>'+
+        '<td class="nums">'+daysOverdue(t)+'</td>'+
+        '<td class="nums">'+(t.alertSent?fmt(t.alertSent):dash)+'</td>'+
+        '<td style="text-align:center">'+(t.mgrAck?'☑':'☐')+'</td>'+
+        '<td class="nums">'+(t.ackDate?fmt(t.ackDate):dash)+'</td>'+
+        '<td class="nums">'+(t.escalated?'<span class="esc">'+fmt(t.escalated)+'</span>':dash)+'</td>'+
+      '</tr>';
+    }).join('');
+    document.getElementById('tmCount').textContent = state.tasks.length+' tasks';
+  }
+
+  function nextTaskId(){
+    var max = 0;
+    state.tasks.forEach(function(t){
+      var n = parseInt(String(t.id).replace(/\D/g,''),10);
+      if(!isNaN(n) && n > max) max = n;
+    });
+    return "TASK-" + String(max+1).padStart(3,"0");
+  }
+
+  function addTask(){
+    var name = document.getElementById('f-name').value.trim();
+    var emp = document.getElementById('f-emp').value;
+    var freq = parseInt(document.getElementById('f-freq').value,10);
+    var ticket = document.getElementById('f-ticket').value === "yes";
+    var startStr = document.getElementById('f-start').value;
+
+    if(!name){ toast('bad','Task name required','Give the task a name before creating it.'); return; }
+    if(isNaN(freq) || freq < 1){ toast('bad','Invalid frequency','Frequency must be at least 1 day.'); return; }
+    if(!startStr){ toast('bad','Cycle start required','Pick the date this task’s first cycle begins.'); return; }
+
+    var parts = startStr.split('-');
+    var start = new Date(+parts[0], +parts[1]-1, +parts[2]);
+    var id = nextTaskId();
+
+    state.tasks.push({
+      id:id, name:name, employee:emp, freq:freq, ticket:ticket,
+      due:new Date(start), cycleStart:new Date(start),
+      lastCompleted:null, completedBy:null, ticketProof:null,
+      alertSent:null, mgrAck:false, ackDate:null, escalated:null
+    });
+
+    pushLog('created', id, name, emp,
+      'Task created by the owner — '+(freq===1?'daily':'every '+freq+' days')+', '+
+      (ticket?'ticket ID required':'DONE confirmation only')+', first cycle starts '+fmt(start)+'.');
+    toast('ok','Task created', id+' — '+name+', assigned to '+emp+'.');
+
+    document.getElementById('f-name').value = '';
+    document.getElementById('addFormCard').hidden = true;
+    renderAll();
+  }
+
+  function renderLog(){
+    var list = document.getElementById('logList');
+    if(state.log.length===0){ list.innerHTML = '<div class="empty"><b>No events yet</b>Complete a task, run the daily check, or acknowledge something to see entries here.</div>'; return; }
+    var typeClass = {complete:'t-complete',alert:'t-alert',escalate:'t-escalate',ack:'t-ack',created:'t-create'};
+    var typeLabel = {complete:'Task Completed',alert:'Manager Alert Sent',escalate:'Leadership Escalation',ack:'Manager Acknowledged',created:'Task Created'};
+    list.innerHTML = state.log.map(function(e){
+      return '<div class="log-row">'+
+        '<div class="log-time nums">'+e.time.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})+'</div>'+
+        '<div><div class="log-type '+typeClass[e.type]+'">'+typeLabel[e.type]+' · '+e.taskId+'</div>'+
+        '<div class="log-detail">'+e.detail+'</div></div>'+
+      '</div>';
+    }).join('');
+  }
+
+  function renderInbox(){
+    var list = document.getElementById('inboxList');
+    document.getElementById('inboxCount').textContent = state.inbox.length ? '('+state.inbox.length+')' : '';
+    if(state.inbox.length===0){ list.innerHTML = '<div class="inbox-empty">No emails sent yet. Run the daily check to simulate one.</div>'; return; }
+    list.innerHTML = state.inbox.map(function(m){
+      var ic = m.kind==='escalate' ? '!' : '●';
+      return '<div class="mail '+m.kind+'">'+
+        '<div class="ic">'+ic+'</div>'+
+        '<div class="body"><div class="to">To: '+m.to+'</div>'+
+        '<div class="subj">'+m.subject+'</div>'+
+        '<div class="snippet">'+m.snippet+'</div></div>'+
+      '</div>';
+    }).join('');
+  }
+
+  function runDailyCheck(){
+    var sentAny = false;
+    state.tasks.forEach(function(t){
+      var st = status(t);
+      if(st!=="Overdue" && st!=="Due Today") return;
+      if(!t.alertSent){
+        t.alertSent = new Date(TODAY);
+        pushLog('alert', t.id, t.name, t.employee, 'Automated email sent to the manager — same day task became due/overdue.');
+        pushMail('alert','manager@allo-innoware.example', '[Allo Innoware] Pending task: '+t.name+' ('+t.employee+')',
+          t.id+' — '+t.name+', assigned to '+t.employee+', was due '+fmt(t.due)+' and is not yet marked complete.');
+        sentAny = true;
+        return;
+      }
+      if(t.escalated) return;
+      var hoursSinceAlert = (TODAY - t.alertSent)/36e5;
+      var hoursSinceDue = (TODAY - stripTime(t.due))/36e5;
+      var noAck = !t.mgrAck && hoursSinceAlert >= 24;
+      var tooLong = hoursSinceDue >= 72;
+      if(noAck || tooLong){
+        t.escalated = new Date(TODAY);
+        var reason = noAck ? 'No manager acknowledgment within the 24-hour window.' :
+          'Task still unresolved '+Math.floor(hoursSinceDue)+' hours after due date, regardless of acknowledgment.';
+        pushLog('escalate', t.id, t.name, t.employee, 'Escalated to leadership. '+reason);
+        pushMail('escalate','leadership@allo-innoware.example', '[Allo Innoware] ESCALATION: '+t.name+' ('+t.employee+') unresolved',
+          t.id+' — '+t.name+' remains unresolved. '+reason);
+        sentAny = true;
+      }
+    });
+    renderAll();
+    toast(sentAny?'warn':'ok', sentAny?'Daily check complete':'Daily check complete', sentAny ? 'New emails are in the Simulated Inbox tab.' : 'Nothing needed an alert or escalation right now.');
+    if(sentAny) switchTab('inbox');
+  }
+
+  function renderAll(){ renderTaskMaster(); renderEmployeePanel(); renderManagerPanel(); renderLog(); renderInbox(); }
+
+  // ---------- tabs ----------
+  function switchTab(name){
+    document.querySelectorAll('.tab').forEach(function(b){ b.setAttribute('aria-selected', b.dataset.tab===name ? 'true':'false'); });
+    ['taskmaster','employee','manager','log','inbox'].forEach(function(n){
+      document.getElementById('panel-'+n).hidden = (n!==name);
+    });
+  }
+  document.querySelectorAll('.tab').forEach(function(b){ b.addEventListener('click', function(){ switchTab(b.dataset.tab); }); });
+
+  document.getElementById('empSelect').addEventListener('change', function(e){
+    state.selectedEmployee = e.target.value; renderEmployeePanel();
+  });
+  document.getElementById('runCheckBtn').addEventListener('click', runDailyCheck);
+  document.getElementById('resetBtn').addEventListener('click', function(){
+    state.tasks = seedTasks(); state.log = []; state.inbox = [];
+    toast('ok','Reset','Demo data restored to its starting scenario.');
+    renderAll();
+  });
+
+  // ---------- add-task form wiring ----------
+  (function(){
+    var empSel = document.getElementById('f-emp');
+    empSel.innerHTML = EMPLOYEES.map(function(e){ return '<option value="'+e+'">'+e+'</option>'; }).join('');
+    var d = TODAY;
+    document.getElementById('f-start').value =
+      d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+
+    document.getElementById('addToggle').addEventListener('click', function(){
+      var card = document.getElementById('addFormCard');
+      card.hidden = !card.hidden;
+      if(!card.hidden) document.getElementById('f-name').focus();
+    });
+    document.getElementById('addCancel').addEventListener('click', function(){
+      document.getElementById('addFormCard').hidden = true;
+    });
+    document.getElementById('addSave').addEventListener('click', addTask);
+    document.getElementById('f-name').addEventListener('keydown', function(e){ if(e.key==="Enter") addTask(); });
+  })();
+
+  // ---------- boot ----------
+  state.tasks = seedTasks();
+  renderEmpSelect();
+  renderAll();
+})();
+</script>
+
+</body>
+</html>
