@@ -35,6 +35,7 @@ const SHEET_SLA           = 'SLA Settings';
 const SHEET_EMPLOYEE_VIEW = 'Employee Pending View';
 const SHEET_MGR_DASHBOARD = 'Manager Dashboard';
 const SHEET_LOG           = 'Escalation Log';
+const SHEET_ACCESS        = 'Access & Employees';
 
 // Task Master column indexes (0-based)
 const TM = {
@@ -44,7 +45,39 @@ const TM = {
   MGR_ACK: 13, ACK_DATE: 14, ESCALATED: 15
 };
 
-const EMPLOYEE_LIST = ['Employee A','Employee B','Employee C','Employee D','Employee E','Employee F'];
+const EMPLOYEE_FALLBACK = ['Employee A','Employee B','Employee C','Employee D','Employee E','Employee F'];
+
+/**
+ * The employee roster, read from the Access & Employees tab so that adding
+ * someone needs a new row, not a code change.
+ */
+function getEmployees() {
+  const sh = sheetOf(SHEET_ACCESS);
+  if (!sh) return EMPLOYEE_FALLBACK;
+  const last = sh.getLastRow();
+  if (last < 8) return EMPLOYEE_FALLBACK;
+  const names = sh.getRange(8, 1, last - 7, 1).getValues()
+    .map(function (r) { return String(r[0]).trim(); })
+    .filter(function (n) { return n !== ''; });
+  return names.length ? names : EMPLOYEE_FALLBACK;
+}
+
+/**
+ * Checks the owner credentials held in the Access & Employees tab.
+ *
+ * This is a gate, not a vault. The password sits in a sheet cell as plain
+ * text, so anyone who can open the sheet can read it. What it does buy is
+ * that the website cannot write to the sheet without it.
+ */
+function checkAuth(body) {
+  const sh = sheetOf(SHEET_ACCESS);
+  if (!sh) return true;                      // access tab not set up
+  const user = String(sh.getRange('B4').getValue()).trim();
+  const pass = String(sh.getRange('B5').getValue()).trim();
+  if (!user && !pass) return true;           // deliberately left open
+  return String((body && body.user) || '').trim() === user &&
+         String((body && body.pass) || '') === pass;
+}
 
 /* ========================================================================
    SETUP — run once, by the owner
@@ -143,7 +176,7 @@ function handleAnyEdit(e) {
 
 function doGet(e) {
   try {
-    return json({ ok: true, tasks: readTasks(), log: readLog(), employees: EMPLOYEE_LIST });
+    return json({ ok: true, tasks: readTasks(), log: readLog(), employees: getEmployees() });
   } catch (err) {
     return json({ ok: false, error: String(err) });
   }
@@ -154,16 +187,27 @@ function doPost(e) {
     // Sent as text/plain so the browser treats it as a simple request and
     // skips the CORS preflight, which Apps Script cannot answer.
     const body = JSON.parse(e.postData.contents);
+
+    // Actions that change the sheet, or reveal the owner's view, require
+    // the credentials from the Access & Employees tab.
+    const PROTECTED = ['add', 'addEmployee', 'unlock'];
+    if (PROTECTED.indexOf(body.action) !== -1 && !checkAuth(body)) {
+      return json({ ok: false, error: 'Incorrect username or password.', authFailed: true });
+    }
+
     let result;
     switch (body.action) {
-      case 'complete':    result = apiComplete(body);    break;
-      case 'add':         result = apiAdd(body);         break;
-      case 'acknowledge': result = apiAcknowledge(body); break;
-      case 'dailycheck':  result = dailyCheckRun();      break;
+      case 'unlock':      result = { ok: true, message: 'Unlocked.' }; break;
+      case 'complete':    result = apiComplete(body);     break;
+      case 'add':         result = apiAdd(body);          break;
+      case 'addEmployee': result = apiAddEmployee(body);  break;
+      case 'acknowledge': result = apiAcknowledge(body);  break;
+      case 'dailycheck':  result = dailyCheckRun();       break;
       default: return json({ ok: false, error: 'Unknown action: ' + body.action });
     }
     result.tasks = readTasks();
     result.log = readLog();
+    result.employees = getEmployees();
     return json(result);
   } catch (err) {
     return json({ ok: false, error: String(err) });
@@ -253,6 +297,16 @@ function logEvent(taskId, taskName, employee, eventType, details) {
 }
 
 function hoursBetween(a, b) { return (b.getTime() - a.getTime()) / 36e5; }
+
+function firstFreeRow(sheet) {
+  const maxRows = sheet.getMaxRows();
+  const ids = sheet.getRange(2, 1, maxRows - 1, 1).getValues();
+  for (let i = 0; i < ids.length; i++) {
+    if (String(ids[i][0]).trim() === '') return i + 2;
+  }
+  sheet.insertRowAfter(maxRows);
+  return maxRows + 1;
+}
 
 function findTask(taskId) {
   const tasks = readTasks();
@@ -423,7 +477,10 @@ function apiAdd(body) {
   const id = 'TASK-' + ('00' + (max + 1)).slice(-3);
 
   const sheet = sheetOf(SHEET_TASK_MASTER);
-  const row = sheet.getLastRow() + 1;
+  // getLastRow() counts the checkbox column, which is pre-filled far below
+  // the data, so it would drop a new task hundreds of rows down, outside
+  // every formatted range. Use the first row with no Task ID instead.
+  const row = firstFreeRow(sheet);
   const parts = startStr.split('-');
   const start = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
 
@@ -439,6 +496,10 @@ function apiAdd(body) {
     '=IF($B' + row + '="",0,IF($J' + row + '="",0,MAX(0,TODAY()-$J' + row + ')))');
   sheet.getRange(row, 14).insertCheckboxes().setValue(false);
 
+  // Keep Task Master's "Assigned To" dropdown in step with the roster, so a
+  // newly added employee is selectable in the sheet as well as on the site.
+  syncEmployeeValidation();
+
   logEvent(id, name, employee, 'Task Created',
     'Created — ' + (freq === 1 ? 'daily' : 'every ' + freq + ' days') + ', ' +
     (body.ticket ? 'ticket ID required' : 'DONE confirmation only') + '.');
@@ -446,6 +507,28 @@ function apiAdd(body) {
   SpreadsheetApp.flush();
   refreshManagerDashboard();
   return { ok: true, message: id + ' — ' + name + ', assigned to ' + employee + '.' };
+}
+
+function apiAddEmployee(body) {
+  const name = String(body.name || '').trim();
+  if (!name) return { ok: false, error: 'Employee name is required.' };
+
+  const existing = getEmployees();
+  for (let i = 0; i < existing.length; i++) {
+    if (existing[i].toLowerCase() === name.toLowerCase()) {
+      return { ok: false, error: name + ' is already on the roster.' };
+    }
+  }
+
+  const sh = sheetOf(SHEET_ACCESS);
+  if (!sh) return { ok: false, error: 'The Access & Employees tab is missing.' };
+
+  // Append below the last name, starting at row 8.
+  const last = Math.max(sh.getLastRow(), 7);
+  sh.getRange(last + 1, 1).setValue(name);
+  SpreadsheetApp.flush();
+
+  return { ok: true, message: name + ' added to the roster.' };
 }
 
 /* ========================================================================
@@ -522,7 +605,17 @@ function dailyCheckRun() {
    VIEW SYNC
    ===================================================================== */
 
-function refreshViews() { refreshManagerDashboard(); }
+function syncEmployeeValidation() {
+  const tm = sheetOf(SHEET_TASK_MASTER);
+  if (!tm) return;
+  const rule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(getEmployees(), true)
+    .setAllowInvalid(true)          // never block a write, only guide typing
+    .build();
+  tm.getRange(2, 3, tm.getMaxRows() - 1, 1).setDataValidation(rule);
+}
+
+function refreshViews() { refreshManagerDashboard(); syncEmployeeValidation(); }
 
 /**
  * Employee Pending View needs nothing: columns A-G are a live FILTER over

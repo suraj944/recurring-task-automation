@@ -176,6 +176,15 @@
   .addform input:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
   .addform .actions{display:flex;gap:8px;align-items:flex-end}
   .addform-note{padding:0 16px 14px;font-size:11.5px;color:var(--fg-dim)}
+  .lockscreen{padding:34px 22px;text-align:center;max-width:520px;margin:0 auto}
+  .lockscreen h3{font-size:16px;margin-bottom:7px}
+  .lockscreen p{font-size:13px;color:var(--fg-dim);line-height:1.55;margin:0 auto 16px;max-width:400px}
+  .lock-ic{font-size:26px;margin-bottom:10px}
+  .lock-form{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-bottom:16px}
+  .lock-form input{border:1px solid var(--border);background:var(--surface-2);color:var(--fg);
+    font-size:13px;padding:9px 12px;border-radius:9px;width:170px;font-family:inherit}
+  .lock-form input:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+  .lock-note{font-size:11.5px!important;color:var(--fg-dim);max-width:430px}
 
   .note{font-size:12px;color:var(--fg-dim);line-height:1.5;margin-top:14px;padding:12px 14px;
     background:var(--surface-2);border-radius:10px;border:1px solid var(--border)}
@@ -249,12 +258,31 @@
   <section class="panel" id="panel-taskmaster" hidden>
     <div class="section-head">
       <h2>Task Master <span class="lock-pill">🔒 Owner only</span></h2>
-      <button class="btn btn-primary" id="addToggle">+ Add task</button>
+      <button class="btn btn-primary" id="addToggle" hidden>+ Add task</button>
+      <button class="btn btn-ghost" id="lockBtn" hidden>Lock again</button>
     </div>
+
+    <div class="card lockscreen" id="lockScreen">
+      <div class="lock-ic">🔒</div>
+      <h3>This tab is restricted</h3>
+      <p>Task Master is the source of truth for every task, so it is kept behind the owner's credentials. Sign in to view it and to add tasks.</p>
+      <form class="lock-form" id="lockForm" autocomplete="off">
+        <input type="text" id="authUser" placeholder="Username" autocomplete="username" aria-label="Username">
+        <input type="password" id="authPass" placeholder="Password" autocomplete="current-password" aria-label="Password">
+        <button class="btn btn-primary" type="submit" id="authGo">Unlock</button>
+      </form>
+      <p class="lock-note">Credentials live in the <b>Access &amp; Employees</b> tab of the sheet. This gate controls the Task Master view and who may add tasks; the sheet itself is protected by Google's own sharing settings.</p>
+    </div>
+
+    <div id="tmContents" hidden>
     <div class="card" id="addFormCard" hidden>
       <div class="addform">
         <div><label for="f-name">Task name</label><input type="text" id="f-name" placeholder="e.g. Daily Dispatch Log"></div>
-        <div><label for="f-emp">Assigned to</label><select id="f-emp"></select></div>
+        <div><label for="f-emp">Assigned to</label><select id="f-emp"></select>
+          <div id="newEmpWrap" hidden style="margin-top:7px;display:flex;gap:6px">
+            <input type="text" id="f-newemp" placeholder="New employee name">
+            <button class="btn btn-primary" id="addEmpBtn" type="button">Add</button>
+          </div></div>
         <div><label for="f-freq">Frequency (days)</label><input type="number" id="f-freq" value="1" min="1" max="365"></div>
         <div><label for="f-ticket">Requires ticket?</label><select id="f-ticket"><option value="no">No — type DONE</option><option value="yes">Yes — needs Ticket ID</option></select></div>
         <div><label for="f-start">Cycle start date</label><input type="date" id="f-start"></div>
@@ -281,6 +309,7 @@
       </table>
     </div>
     <div class="note" id="tmNote">Read-only here because it is read-only in the sheet — locked to the owner's account, so no employee can edit a Task ID, reassign work, or backdate a completion. The completion, alert and escalation columns are written by the automation, never typed by hand. Scroll sideways for all 16 columns.</div>
+    </div>
   </section>
 
   <!-- EMPLOYEE VIEW -->
@@ -296,7 +325,7 @@
   <!-- MANAGER DASHBOARD -->
   <section class="panel" id="panel-manager" hidden>
     <div class="section-head">
-      <h2>All tasks</h2>
+      <h2>Pending &amp; overdue</h2>
       <span class="meta" id="mgrMeta"></span>
     </div>
     <div class="card table-wrap">
@@ -369,7 +398,8 @@
     endpoint: "",
     tasks: [], log: [], inbox: [],
     selectedEmployee: "Employee A",
-    busy: false
+    busy: false,
+    auth: null                // {user, pass} once the owner has unlocked
   };
 
   // Demo mode pins "today" so the fixture always tells the same story.
@@ -438,13 +468,20 @@
     return fetch(state.endpoint, { method:"GET", redirect:"follow" })
       .then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.json(); });
   }
+  // Writes and the Task Master view are gated server-side, so these carry
+  // the owner's credentials.
+  function withAuth(payload){
+    if(state.auth){ payload.user = state.auth.user; payload.pass = state.auth.pass; }
+    return payload;
+  }
+
   function apiPost(payload){
     // text/plain keeps this a "simple" request, so the browser skips the
     // CORS preflight that Apps Script cannot answer.
     return fetch(state.endpoint, {
       method:"POST", redirect:"follow",
       headers:{ "Content-Type":"text/plain;charset=utf-8" },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(withAuth(payload))
     }).then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.json(); });
   }
 
@@ -570,6 +607,10 @@
   function addTask(){
     var name = document.getElementById("f-name").value.trim();
     var emp = document.getElementById("f-emp").value;
+    if(emp === NEW_EMP){
+      toast("warn","Add the employee first","Enter the new name and press Add, then create the task.");
+      return;
+    }
     var freq = parseInt(document.getElementById("f-freq").value,10);
     var ticket = document.getElementById("f-ticket").value === "yes";
     var startStr = document.getElementById("f-start").value;
@@ -715,13 +756,35 @@
     setBusy(false);
   }
 
+  var NEW_EMP = "__new__";
+
   function renderEmpSelect(){
     var sel = document.getElementById("empSelect");
     if(EMPLOYEES.indexOf(state.selectedEmployee) === -1) state.selectedEmployee = EMPLOYEES[0];
-    sel.innerHTML = EMPLOYEES.map(function(e){ return '<option value="'+e+'">'+e+'</option>'; }).join("");
+    var opts = EMPLOYEES.map(function(e){ return '<option value="'+esc(e)+'">'+esc(e)+'</option>'; }).join("");
+    sel.innerHTML = opts;
     sel.value = state.selectedEmployee;
     var f = document.getElementById("f-emp");
-    f.innerHTML = EMPLOYEES.map(function(e){ return '<option value="'+e+'">'+e+'</option>'; }).join("");
+    var keep = f.value;
+    f.innerHTML = opts + '<option value="'+NEW_EMP+'">+ Add a new employee…</option>';
+    if(keep && keep !== NEW_EMP && EMPLOYEES.indexOf(keep) !== -1) f.value = keep;
+  }
+
+  function addEmployee(){
+    var name = document.getElementById("f-newemp").value.trim();
+    if(!name){ toast("warn","Name required","Type the new employee's name first."); return; }
+    if(state.mode !== "live"){ toast("warn","Not connected","Connect to the sheet to add an employee."); return; }
+    setBusy(true,"Adding employee…");
+    apiPost({action:"addEmployee", name:name}).then(function(res){
+      setBusy(false);
+      if(!res.ok){ toast("bad","Not added", res.error); return; }
+      if(res.employees){ EMPLOYEES = res.employees; }
+      renderEmpSelect();
+      document.getElementById("f-emp").value = name;
+      document.getElementById("f-newemp").value = "";
+      document.getElementById("newEmpWrap").hidden = true;
+      toast("ok","Employee added", res.message||(name+" can now be assigned tasks."));
+    }).catch(function(err){ setBusy(false); toast("bad","Not added", friendlyError(err)); });
   }
 
   function renderEmployeePanel(){
@@ -782,8 +845,20 @@
   }
 
   function renderManagerPanel(){
-    var rows = state.tasks.slice().sort(function(a,b){ return parseDate(a.due)-parseDate(b.due); });
-    document.getElementById("mgrMeta").textContent = rows.length+" tasks tracked";
+    // This dashboard is for what needs attention. Upcoming work is not the
+    // manager's problem yet, so it stays out until it is due.
+    var rows = state.tasks.filter(function(t){
+      var st = status(t);
+      return st === "Overdue" || st === "Due Today";
+    }).sort(function(a,b){ return parseDate(a.due)-parseDate(b.due); });
+    document.getElementById("mgrMeta").textContent =
+      rows.length + (rows.length===1 ? " task needs attention" : " tasks need attention");
+    if(rows.length===0){
+      document.getElementById("mgrBody").innerHTML =
+        '<tr><td colspan="10"><div class="empty"><b>Nothing outstanding</b>'+
+        'No task is overdue or due today.</div></td></tr>';
+      return;
+    }
     document.getElementById("mgrBody").innerHTML = rows.map(function(t){
       var st = status(t), od = daysOverdue(t);
       return '<tr data-id="'+t.id+'">'+
@@ -845,6 +920,43 @@
     }).join("");
   }
 
+  function renderLock(){
+    var unlocked = !!state.auth;
+    document.getElementById("lockScreen").hidden = unlocked;
+    document.getElementById("tmContents").hidden = !unlocked;
+    document.getElementById("addToggle").hidden = !unlocked;
+    document.getElementById("lockBtn").hidden = !unlocked;
+    if(!unlocked) document.getElementById("addFormCard").hidden = true;
+  }
+
+  function unlock(user, pass){
+    setBusy(true,"Checking…");
+    return apiPost({action:"unlock", user:user, pass:pass}).then(function(res){
+      setBusy(false);
+      if(!res.ok){
+        toast("bad","Not unlocked", res.error||"Incorrect username or password.");
+        return false;
+      }
+      state.auth = {user:user, pass:pass};
+      try{ sessionStorage.setItem("rta_auth", JSON.stringify(state.auth)); }catch(e){}
+      if(res.employees && res.employees.length){ EMPLOYEES = res.employees; renderEmpSelect(); }
+      renderLock(); renderAll();
+      toast("ok","Unlocked","Task Master is visible for this session.");
+      return true;
+    }).catch(function(err){
+      setBusy(false); toast("bad","Could not check", friendlyError(err)); return false;
+    });
+  }
+
+  function lockAgain(){
+    state.auth = null;
+    try{ sessionStorage.removeItem("rta_auth"); }catch(e){}
+    document.getElementById("authUser").value = "";
+    document.getElementById("authPass").value = "";
+    renderLock();
+    toast("ok","Locked","Task Master is hidden again.");
+  }
+
   function renderAll(){ renderTaskMaster(); renderEmployeePanel(); renderManagerPanel(); renderLog(); renderInbox(); }
 
   // ---------- tabs ----------
@@ -876,6 +988,20 @@
     document.getElementById("addFormCard").hidden = true;
   });
   document.getElementById("addSave").addEventListener("click", addTask);
+  document.getElementById("addEmpBtn").addEventListener("click", addEmployee);
+  document.getElementById("f-newemp").addEventListener("keydown", function(e){
+    if(e.key==="Enter"){ e.preventDefault(); addEmployee(); }
+  });
+  document.getElementById("f-emp").addEventListener("change", function(e){
+    var isNew = e.target.value === NEW_EMP;
+    document.getElementById("newEmpWrap").hidden = !isNew;
+    if(isNew) document.getElementById("f-newemp").focus();
+  });
+  document.getElementById("lockForm").addEventListener("submit", function(e){
+    e.preventDefault();
+    unlock(document.getElementById("authUser").value, document.getElementById("authPass").value);
+  });
+  document.getElementById("lockBtn").addEventListener("click", lockAgain);
   document.getElementById("f-name").addEventListener("keydown", function(e){ if(e.key==="Enter") addTask(); });
 
   var scrim = document.getElementById("connectScrim");
@@ -906,8 +1032,13 @@
     var saved = null;
     try{ saved = localStorage.getItem(STORE_KEY); }catch(e){}
 
+    try{
+      var savedAuth = sessionStorage.getItem("rta_auth");
+      if(savedAuth) state.auth = JSON.parse(savedAuth);
+    }catch(e){}
+
     state.tasks = seedTasks();
-    renderMode(); renderEmpSelect(); renderAll();
+    renderMode(); renderEmpSelect(); renderLock(); renderAll();
 
     // A demo pin from an older build would otherwise keep this browser on
     // sample data forever, so clear it and always go for the live sheet.
