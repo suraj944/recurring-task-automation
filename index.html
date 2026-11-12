@@ -503,14 +503,18 @@
   }
 
   function goDemo(){
+    // Fallback only, for when the sheet is unreachable. Never persisted:
+    // the page should always try the live sheet again on the next load.
     state.mode = "demo"; state.endpoint = "";
-    try{ localStorage.setItem(STORE_KEY, "demo"); }catch(e){}
     state.tasks = seedTasks(); state.log = []; state.inbox = [];
     renderMode(); renderEmpSelect(); renderAll(); setBusy(false);
   }
 
   function refresh(){
-    if(state.mode!=="live"){ goDemo(); toast("ok","Demo reset","Back to the starting scenario."); return; }
+    if(state.mode!=="live"){
+      goLive(state.endpoint || DEFAULT_ENDPOINT).catch(function(){});
+      return;
+    }
     setBusy(true,"Refreshing…");
     apiGet().then(function(data){
       if(!data.ok) throw new Error(data.error);
@@ -889,12 +893,13 @@
     state.tasks = seedTasks();
     renderMode(); renderEmpSelect(); renderAll();
 
-    var target = (saved === "demo") ? null : (saved || DEFAULT_ENDPOINT);
-    if(target){
-      goLive(target).catch(function(){
-        toast("warn","Showing demo data","The sheet could not be reached, so this is sample data.");
-      });
-    }
+    // A demo pin from an older build would otherwise keep this browser on
+    // sample data forever, so clear it and always go for the live sheet.
+    if(saved === "demo"){ try{ localStorage.removeItem(STORE_KEY); }catch(e){} saved = null; }
+
+    goLive(saved || DEFAULT_ENDPOINT).catch(function(){
+      toast("warn","Could not reach the sheet","Showing sample data until the connection recovers.");
+    });
   })();
 })();
 </script>
