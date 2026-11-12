@@ -143,6 +143,24 @@
   .chk[disabled]{cursor:not-allowed}
   .chk.chk-locked{accent-color:var(--ok);opacity:1;cursor:default}
   .tm-table td,.tm-table th,.mgr-table td,.mgr-table th{white-space:nowrap}
+
+  /* Wide grids: tighter rows, and the header and Task ID stay put while
+     the other columns scroll sideways, so a row never loses its label. */
+  .grid-scroll{overflow:auto;max-height:68vh}
+  .grid-scroll table{font-size:12.5px}
+  .grid-scroll th{position:sticky;top:0;z-index:3;background:var(--surface-2);
+    padding:8px 11px;font-size:10.5px}
+  .grid-scroll td{padding:7px 11px}
+  .grid-scroll tbody tr:nth-child(even) td{background:var(--surface-2)}
+  .grid-scroll tbody tr:hover td{background:var(--border)}
+  .grid-scroll th:first-child,.grid-scroll td:first-child{
+    position:sticky;left:0;z-index:2;background:var(--surface);
+    border-right:1px solid var(--border)}
+  .grid-scroll th:first-child{z-index:4;background:var(--surface-2)}
+  .grid-scroll tbody tr:nth-child(even) td:first-child{background:var(--surface-2)}
+  .grid-scroll tbody tr:hover td:first-child{background:var(--border)}
+  .grid-scroll .pill{padding:2px 7px;font-size:10.5px}
+  .grid-scroll .del-btn{padding:3px 8px;font-size:10.5px}
   .esc{color:var(--bad);font-weight:700}
   .act-cell{text-align:right;white-space:nowrap}
   .del-btn{appearance:none;border:1px solid var(--border);background:transparent;color:var(--fg-dim);
@@ -326,7 +344,7 @@
       <span class="meta">Single source of truth · every other tab is derived from this</span>
       <span class="meta" id="tmCount"></span>
     </div>
-    <div class="card table-wrap">
+    <div class="card table-wrap grid-scroll">
       <table class="tm-table">
         <thead><tr>
           <th>Task ID</th><th>Task Name</th><th>Assigned To</th><th>Frequency (Days)</th><th>Requires Ticket?</th>
@@ -358,7 +376,7 @@
       <h2>Pending &amp; overdue</h2>
       <span class="meta" id="mgrMeta"></span>
     </div>
-    <div class="card table-wrap">
+    <div class="card table-wrap grid-scroll">
       <table class="mgr-table">
         <thead><tr>
           <th>Task ID</th><th>Task Name</th><th>Assigned To</th><th>Due Date</th><th>Status</th>
@@ -452,6 +470,13 @@
     var dt = parseDate(d);
     if(!dt) return "";
     return dt.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
+  }
+
+  // Wide grids repeat a date in six columns, so they use a two-digit year.
+  function fmtShort(d){
+    var dt = parseDate(d);
+    if(!dt) return "";
+    return dt.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'2-digit'});
   }
 
   // A row can exist without the fields that give it a due date - half
@@ -881,17 +906,17 @@
         '<td>'+esc(t.employee)+'</td>'+
         '<td class="nums">'+t.freq+'</td>'+
         '<td>'+(t.ticket?'Yes':'No')+'</td>'+
-        '<td class="nums">'+(fmt(t.cycleStart)||DASH)+'</td>'+
-        '<td class="nums">'+(t.lastCompleted?fmt(t.lastCompleted):DASH)+'</td>'+
+        '<td class="nums">'+(fmtShort(t.cycleStart)||DASH)+'</td>'+
+        '<td class="nums">'+(t.lastCompleted?fmtShort(t.lastCompleted):DASH)+'</td>'+
         '<td>'+(t.completedBy?esc(t.completedBy):DASH)+'</td>'+
         '<td>'+(t.ticketProof?esc(t.ticketProof):DASH)+'</td>'+
-        '<td class="nums">'+fmt(t.due)+'</td>'+
+        '<td class="nums">'+fmtShort(t.due)+'</td>'+
         '<td>'+pill(status(t))+'</td>'+
         '<td class="nums">'+daysOverdue(t)+'</td>'+
-        '<td class="nums">'+(t.alertSent?fmt(t.alertSent):DASH)+'</td>'+
+        '<td class="nums">'+(t.alertSent?fmtShort(t.alertSent):DASH)+'</td>'+
         '<td style="text-align:center">'+(t.mgrAck?'☑':'☐')+'</td>'+
-        '<td class="nums">'+(t.ackDate?fmt(t.ackDate):DASH)+'</td>'+
-        '<td class="nums">'+(t.escalated?'<span class="esc">'+fmt(t.escalated)+'</span>':DASH)+'</td>'+
+        '<td class="nums">'+(t.ackDate?fmtShort(t.ackDate):DASH)+'</td>'+
+        '<td class="nums">'+(t.escalated?'<span class="esc">'+fmtShort(t.escalated)+'</span>':DASH)+'</td>'+
         '<td class="act-cell"><button class="del-btn" data-id="'+esc(t.id)+'" '+
           'title="Delete '+esc(t.id)+'">Delete</button></td>'+
       '</tr>';
@@ -924,15 +949,15 @@
         '<td class="nums tname">'+esc(t.id)+'</td>'+
         '<td>'+esc(t.name)+'</td>'+
         '<td>'+esc(t.employee)+'</td>'+
-        '<td class="nums">'+fmt(t.due)+'</td>'+
+        '<td class="nums">'+fmtShort(t.due)+'</td>'+
         '<td>'+pill(st)+'</td>'+
         '<td class="nums">'+(od?od:DASH)+'</td>'+
-        '<td class="nums">'+(t.alertSent?fmt(t.alertSent):DASH)+'</td>'+
+        '<td class="nums">'+(t.alertSent?fmtShort(t.alertSent):DASH)+'</td>'+
         '<td style="text-align:center"><input type="checkbox" class="chk'+(t.mgrAck?" chk-locked":"")+'" '+
           (t.mgrAck?'checked disabled title="Acknowledged '+fmt(t.ackDate)+' — this cannot be undone"':
                     (st==="Upcoming"?'disabled title="Nothing to acknowledge yet"':''))+'></td>'+
-        '<td class="nums">'+(t.ackDate?fmt(t.ackDate):DASH)+'</td>'+
-        '<td class="nums">'+(t.escalated?'<span class="esc">'+fmt(t.escalated)+'</span>':DASH)+'</td>'+
+        '<td class="nums">'+(t.ackDate?fmtShort(t.ackDate):DASH)+'</td>'+
+        '<td class="nums">'+(t.escalated?'<span class="esc">'+fmtShort(t.escalated)+'</span>':DASH)+'</td>'+
       '</tr>';
     }).join("");
     Array.prototype.forEach.call(document.querySelectorAll("#mgrBody .chk"), function(cb){
