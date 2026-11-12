@@ -459,6 +459,19 @@
   </div>
 </div>
 
+<!-- COMPLETION CONFIRMATION -->
+<div class="scrim" id="subScrim" hidden>
+  <div class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="subTitle">
+    <h2 id="subTitle">Submit this update?</h2>
+    <div class="del-summary" id="subSummary"></div>
+    <p id="subDesc">This records the task as complete, starts its next cycle, and writes an entry to the Escalation Log. Any alert or escalation already raised for the current cycle is cleared.</p>
+    <div class="dialog-actions">
+      <button class="btn btn-primary" id="subConfirm">Confirm completion</button>
+      <button class="btn btn-ghost" id="subCancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast-stack" id="toastStack"></div>
 
 <script>
@@ -698,8 +711,43 @@
       return;
     }
 
+    // Everything below actually writes, so confirm first.
+    askSubmit(t, entry);
+  }
+
+  var pendingSubmit = null;
+
+  function askSubmit(t, entry){
+    pendingSubmit = { id:t.id, entry:entry };
+
+    var nextDue = addDays(today(), t.freq);
+    var st = status(t);
+    document.getElementById("subSummary").innerHTML =
+      '<span class="tid-big">'+esc(t.id)+'</span> \u00b7 '+esc(t.name)+
+      '<dl>'+
+        '<dt>Submitting</dt><dd><b>'+esc(entry)+'</b></dd>'+
+        '<dt>As</dt><dd>'+esc(state.selectedEmployee)+'</dd>'+
+        '<dt>Currently</dt><dd>'+pill(st)+
+          (st==="Overdue" ? ' <span class="nums">'+daysOverdue(t)+
+             (daysOverdue(t)===1?' day':' days')+' overdue</span>' : '')+'</dd>'+
+        '<dt>Next due becomes</dt><dd>'+fmt(nextDue)+'</dd>'+
+      '</dl>';
+
+    document.getElementById("subScrim").hidden = false;
+    document.getElementById("subConfirm").focus();
+  }
+
+  function closeSubmit(){
+    pendingSubmit = null;
+    document.getElementById("subScrim").hidden = true;
+  }
+
+  function doComplete(id, entry){
+    var t = state.tasks.filter(function(x){ return x.id===id; })[0];
+    if(!t) return;
+
     if(state.mode==="live"){
-      setBusy(true,"Saving to sheet…");
+      setBusy(true,"Saving to sheet\u2026");
       apiPost({action:"complete", taskId:id, entry:entry, employee:state.selectedEmployee})
         .then(function(res){
           if(!res.ok) throw new Error(res.error);
@@ -1191,6 +1239,15 @@
     closeDelete();
     if(id) deleteTask(id);
   });
+
+  var subScrim = document.getElementById("subScrim");
+  document.getElementById("subCancel").addEventListener("click", closeSubmit);
+  subScrim.addEventListener("click", function(e){ if(e.target===subScrim) closeSubmit(); });
+  document.getElementById("subConfirm").addEventListener("click", function(){
+    var pend = pendingSubmit;
+    closeSubmit();
+    if(pend) doComplete(pend.id, pend.entry);
+  });
   document.getElementById("pwToggle").addEventListener("click", function(){
     var field = document.getElementById("authPass");
     var showing = field.type === "text";
@@ -1214,6 +1271,7 @@
     if(e.key!=="Escape") return;
     scrim.hidden = true;
     closeDelete();
+    closeSubmit();
   });
   document.getElementById("connectSave").addEventListener("click", function(){
     var url = document.getElementById("endpointInput").value.trim();
