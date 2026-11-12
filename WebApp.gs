@@ -484,7 +484,17 @@ function apiAdd(body) {
   const parts = startStr.split('-');
   const start = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
 
-  sheet.getRange(row, 1, 1, 6).setValues([[id, name, employee, freq, body.ticket ? 'Yes' : 'No', start]]);
+  // A strict data-validation rule anywhere in A:F makes setValues throw
+  // part-written, which used to leave a row holding only an ID and a name -
+  // enough to break every view that expects a due date. If anything fails,
+  // wipe the row so the sheet is never left in that state.
+  try {
+    sheet.getRange(row, 1, 1, 6).setValues([[id, name, employee, freq, body.ticket ? 'Yes' : 'No', start]]);
+  } catch (err) {
+    sheet.getRange(row, 1, 1, 16).clearContent();
+    return { ok: false, error: 'Could not write the task: ' + err +
+      ' (nothing was left half-written).' };
+  }
 
   // The three calculated columns, matching the rows above.
   sheet.getRange(row, 10).setFormula(

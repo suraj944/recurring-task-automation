@@ -119,6 +119,7 @@
   .pill-bad{background:var(--bad-bg);color:var(--bad)}
   .pill-warn{background:var(--warn-bg);color:var(--warn)}
   .pill-ok{background:var(--ok-bg);color:var(--ok)}
+  .pill-none{background:var(--surface-2);color:var(--fg-dim)}
   .pill-dot{width:6px;height:6px;border-radius:50%;background:currentColor;flex:none}
 
   .entry-form{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
@@ -427,7 +428,10 @@
   // Demo mode pins "today" so the fixture always tells the same story.
   var DEMO_TODAY = new Date(2026,10,12);
   function today(){ return state.mode === "live" ? stripTime(new Date()) : DEMO_TODAY; }
-  function stripTime(d){ return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
+  function stripTime(d){
+    if(!d) return null;                       // a row with no due date yet
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  }
   function addDays(d,n){ var r = new Date(d); r.setDate(r.getDate()+n); return r; }
   function diffDays(a,b){ return Math.round((a-b)/86400000); }
   function parseDate(v){
@@ -443,7 +447,13 @@
     return dt.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
   }
 
+  // A row can exist without the fields that give it a due date - half
+  // entered by hand, or a write that did not finish. It is still shown in
+  // Task Master so it can be spotted and fixed, but it has no real status.
+  function isIncomplete(t){ return !stripTime(parseDate(t.due)); }
+
   function status(t){
+    if(isIncomplete(t)) return "Incomplete";
     if(t._status) return t._status;                 // live: the sheet decides
     var d = diffDays(today(), stripTime(parseDate(t.due)));
     if(d > 0) return "Overdue";
@@ -451,11 +461,20 @@
     return "Upcoming";
   }
   function daysOverdue(t){
+    if(isIncomplete(t)) return 0;
     if(typeof t._days === "number") return t._days;
     var d = diffDays(today(), stripTime(parseDate(t.due)));
     return Math.max(0, d);
   }
+  function byDue(a,b){
+    var da = parseDate(a.due), db = parseDate(b.due);
+    if(!da && !db) return 0;
+    if(!da) return 1;                                // unfinished rows last
+    if(!db) return -1;
+    return da - db;
+  }
   function pill(st){
+    if(st==="Incomplete") return '<span class="pill pill-none"><span class="pill-dot"></span>Incomplete</span>';
     if(st==="Overdue")   return '<span class="pill pill-bad"><span class="pill-dot"></span>Overdue</span>';
     if(st==="Due Today") return '<span class="pill pill-warn"><span class="pill-dot"></span>Due Today</span>';
     return '<span class="pill pill-ok"><span class="pill-dot"></span>Upcoming</span>';
@@ -594,6 +613,10 @@
   function completeTask(id, raw){
     var t = state.tasks.filter(function(x){ return x.id===id; })[0];
     if(!t) return;
+    if(isIncomplete(t)){
+      toast("bad","Task is incomplete", t.id+" has no cycle start date, so it has no due date to close.");
+      return;
+    }
     var entry = String(raw||"").trim();
     if(!entry){ toast("warn","Nothing entered","Type a value before submitting."); return; }
     if(entry.toUpperCase()==="DONE") entry = "DONE";
@@ -811,8 +834,9 @@
 
   function renderEmployeePanel(){
     var list = document.getElementById("empList");
-    var mine = state.tasks.filter(function(t){ return t.employee===state.selectedEmployee; })
-      .sort(function(a,b){ return parseDate(a.due) - parseDate(b.due); });
+    var mine = state.tasks.filter(function(t){
+      return t.employee===state.selectedEmployee && !isIncomplete(t);
+    }).sort(byDue);
     if(mine.length===0){
       list.innerHTML = '<div class="empty"><b>Nothing pending</b>All caught up for '+state.selectedEmployee+'.</div>';
       return;
@@ -863,7 +887,10 @@
         '<td class="nums">'+(t.escalated?'<span class="esc">'+fmt(t.escalated)+'</span>':DASH)+'</td>'+
       '</tr>';
     }).join("");
-    document.getElementById("tmCount").textContent = state.tasks.length+" tasks";
+    var broken = state.tasks.filter(isIncomplete).length;
+    document.getElementById("tmCount").textContent =
+      state.tasks.length + " tasks" +
+      (broken ? " · " + broken + " incomplete, missing a cycle start date" : "");
   }
 
   function renderManagerPanel(){
@@ -872,7 +899,7 @@
     var rows = state.tasks.filter(function(t){
       var st = status(t);
       return st === "Overdue" || st === "Due Today";
-    }).sort(function(a,b){ return parseDate(a.due)-parseDate(b.due); });
+    }).sort(byDue);
     document.getElementById("mgrMeta").textContent =
       rows.length + (rows.length===1 ? " task needs attention" : " tasks need attention");
     if(rows.length===0){
