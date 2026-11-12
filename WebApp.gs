@@ -190,7 +190,7 @@ function doPost(e) {
 
     // Actions that change the sheet, or reveal the owner's view, require
     // the credentials from the Access & Employees tab.
-    const PROTECTED = ['add', 'addEmployee', 'unlock'];
+    const PROTECTED = ['add', 'addEmployee', 'unlock', 'deleteTask'];
     if (PROTECTED.indexOf(body.action) !== -1 && !checkAuth(body)) {
       return json({ ok: false, error: 'Incorrect username or password.', authFailed: true });
     }
@@ -200,6 +200,7 @@ function doPost(e) {
       case 'unlock':      result = { ok: true, message: 'Unlocked.' }; break;
       case 'complete':    result = apiComplete(body);     break;
       case 'add':         result = apiAdd(body);          break;
+      case 'deleteTask':  result = apiDelete(body);       break;
       case 'addEmployee': result = apiAddEmployee(body);  break;
       case 'acknowledge': result = apiAcknowledge(body);  break;
       case 'dailycheck':  result = dailyCheckRun();       break;
@@ -539,6 +540,28 @@ function apiAddEmployee(body) {
   SpreadsheetApp.flush();
 
   return { ok: true, message: name + ' added to the roster.' };
+}
+
+/**
+ * Removes a task entirely. Deliberately destructive and owner-only, so the
+ * deletion is written to the Escalation Log first: the task row disappears,
+ * but the record that it existed and was removed does not.
+ */
+function apiDelete(body) {
+  const task = findTask(body.taskId);
+  if (!task) return { ok: false, error: 'Task not found: ' + body.taskId };
+
+  logEvent(task.id, task.name, task.employee, 'Task Deleted',
+    'Removed from Task Master by the owner. Was ' + (task.status || 'unscheduled').toLowerCase() +
+    (task.due ? ', due ' + task.due : '') + '.');
+
+  // Delete the row rather than blanking it, so the list stays contiguous.
+  // Sheets re-points the calculated columns on the rows below automatically.
+  sheetOf(SHEET_TASK_MASTER).deleteRow(task.row);
+  SpreadsheetApp.flush();
+  refreshManagerDashboard();
+
+  return { ok: true, message: task.id + ' \u2014 ' + task.name + ' deleted.' };
 }
 
 /* ========================================================================
