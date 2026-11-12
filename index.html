@@ -352,6 +352,11 @@
   var EMPLOYEES = ["Employee A","Employee B","Employee C","Employee D","Employee E","Employee F"];
   var STORE_KEY = "rta_endpoint";
 
+  // The deployed Apps Script Web App backing this site. Baked in so the page
+  // connects to the real sheet for every visitor with no setup. A viewer can
+  // still point it at their own endpoint, or drop to demo data, via the gear.
+  var DEFAULT_ENDPOINT = "https://script.google.com/macros/s/AKfycbxt9_ByHUnU4GrPaEEd435lN7UektzXZKTLsHvcheUqNrADIWT_-0gvGSjw5uFbwrPsMg/exec";
+
   var state = {
     mode: "demo",            // "demo" | "live"
     endpoint: "",
@@ -497,7 +502,7 @@
 
   function goDemo(){
     state.mode = "demo"; state.endpoint = "";
-    try{ localStorage.removeItem(STORE_KEY); }catch(e){}
+    try{ localStorage.setItem(STORE_KEY, "demo"); }catch(e){}
     state.tasks = seedTasks(); state.log = []; state.inbox = [];
     renderMode(); renderEmpSelect(); renderAll(); setBusy(false);
   }
@@ -885,9 +890,10 @@
     state.tasks = seedTasks();
     renderMode(); renderEmpSelect(); renderAll();
 
-    if(saved){
-      goLive(saved).catch(function(){
-        toast("warn","Showing demo data","Saved sheet connection could not be reached.");
+    var target = (saved === "demo") ? null : (saved || DEFAULT_ENDPOINT);
+    if(target){
+      goLive(target).catch(function(){
+        toast("warn","Showing demo data","The sheet could not be reached, so this is sample data.");
       });
     }
   })();
