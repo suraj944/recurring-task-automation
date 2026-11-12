@@ -331,11 +331,22 @@ function recordCompletion(taskId, rawEntry, employeeName) {
   let entry = String(rawEntry || '').trim();
   if (!entry) return { ok: false, error: 'Nothing entered.' };
 
-  // "done" in any case becomes DONE
-  if (entry.toUpperCase() === 'DONE') entry = 'DONE';
+  // "done" in any case is accepted and normalised to DONE.
+  const isDone = entry.toUpperCase() === 'DONE';
+  if (isDone) entry = 'DONE';
 
-  if (task.ticket && entry === 'DONE') {
-    return { ok: false, error: 'This task requires a Ticket ID, not DONE.' };
+  if (task.ticket) {
+    // A portal task needs its real ticket reference, never the word DONE.
+    if (isDone) {
+      return { ok: false, error: 'This task requires a Ticket ID, not DONE.' };
+    }
+  } else {
+    // A confirmation task takes the word DONE and nothing else. Accepting
+    // any text at all meant a stray keystroke closed the cycle silently.
+    if (!isDone) {
+      return { ok: false, error: 'Type DONE to confirm this task. "' + entry +
+        '" was not accepted, so the task is still open.' };
+    }
   }
 
   const sheet = sheetOf(SHEET_TASK_MASTER);

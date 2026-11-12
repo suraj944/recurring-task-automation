@@ -161,6 +161,16 @@
   .grid-scroll tbody tr:hover td:first-child{background:var(--border)}
   .grid-scroll .pill{padding:2px 7px;font-size:10.5px}
   .grid-scroll .del-btn{padding:3px 8px;font-size:10.5px}
+
+  /* A wide grid is only obviously scrollable if the bar is visible, so it
+     is always drawn rather than fading in on hover. */
+  .grid-scroll{scrollbar-width:auto;scrollbar-color:var(--fg-dim) var(--surface-2)}
+  .grid-scroll::-webkit-scrollbar{width:13px;height:13px}
+  .grid-scroll::-webkit-scrollbar-track{background:var(--surface-2);border-radius:8px}
+  .grid-scroll::-webkit-scrollbar-thumb{background:var(--fg-dim);border-radius:8px;
+    border:3px solid var(--surface-2)}
+  .grid-scroll::-webkit-scrollbar-thumb:hover{background:var(--fg)}
+  .grid-scroll::-webkit-scrollbar-corner{background:var(--surface-2)}
   .esc{color:var(--bad);font-weight:700}
   .act-cell{text-align:right;white-space:nowrap}
   .del-btn{appearance:none;border:1px solid var(--border);background:transparent;color:var(--fg-dim);
@@ -673,9 +683,18 @@
     }
     var entry = String(raw||"").trim();
     if(!entry){ toast("warn","Nothing entered","Type a value before submitting."); return; }
-    if(entry.toUpperCase()==="DONE") entry = "DONE";
-    if(t.ticket && entry==="DONE"){
-      toast("bad","⚠ Update not saved","This task requires a Ticket ID, not DONE.");
+    // "done" in any case is accepted and normalised to DONE.
+    var isDone = entry.toUpperCase()==="DONE";
+    if(isDone) entry = "DONE";
+
+    if(t.ticket && isDone){
+      toast("bad","⚠ Not saved","This task requires a Ticket ID, not DONE.");
+      return;
+    }
+    if(!t.ticket && !isDone){
+      // Any text at all used to close the cycle, so a stray keystroke
+      // silently marked work complete.
+      toast("bad","⚠ Not saved",'Type DONE to confirm this task. "'+esc(entry)+'" was not accepted.');
       return;
     }
 
