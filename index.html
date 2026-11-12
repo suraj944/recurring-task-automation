@@ -140,6 +140,7 @@
   .table-wrap{overflow-x:auto}
   .chk{width:17px;height:17px;accent-color:var(--accent);cursor:pointer}
   .chk[disabled]{cursor:not-allowed}
+  .chk.chk-locked{accent-color:var(--ok);opacity:1;cursor:default}
   .tm-table td,.tm-table th,.mgr-table td,.mgr-table th{white-space:nowrap}
   .esc{color:var(--bad);font-weight:700}
 
@@ -793,15 +794,21 @@
         '<td>'+pill(st)+'</td>'+
         '<td class="nums">'+(od?od:DASH)+'</td>'+
         '<td class="nums">'+(t.alertSent?fmt(t.alertSent):DASH)+'</td>'+
-        '<td style="text-align:center"><input type="checkbox" class="chk" '+(t.mgrAck?"checked":"")+
-          (st==="Upcoming"?" disabled":"")+'></td>'+
+        '<td style="text-align:center"><input type="checkbox" class="chk'+(t.mgrAck?" chk-locked":"")+'" '+
+          (t.mgrAck?'checked disabled title="Acknowledged '+fmt(t.ackDate)+' — this cannot be undone"':
+                    (st==="Upcoming"?'disabled title="Nothing to acknowledge yet"':''))+'></td>'+
         '<td class="nums">'+(t.ackDate?fmt(t.ackDate):DASH)+'</td>'+
         '<td class="nums">'+(t.escalated?'<span class="esc">'+fmt(t.escalated)+'</span>':DASH)+'</td>'+
       '</tr>';
     }).join("");
     Array.prototype.forEach.call(document.querySelectorAll("#mgrBody .chk"), function(cb){
       cb.addEventListener("change", function(){
-        if(cb.checked) acknowledge(cb.closest("tr").getAttribute("data-id"));
+        if(cb.disabled) return;
+        if(cb.checked){ acknowledge(cb.closest("tr").getAttribute("data-id")); return; }
+        // Un-ticking is not a supported action: an acknowledgment is a
+        // recorded decision, so put the box back.
+        cb.checked = true;
+        toast("warn","Cannot be undone","An acknowledgment stays on the audit trail once recorded.");
       });
     });
   }
