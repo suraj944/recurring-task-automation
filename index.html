@@ -339,7 +339,6 @@
     <input type="url" id="endpointInput" placeholder="https://script.google.com/macros/s/AKfy.../exec" autocomplete="off" spellcheck="false">
     <div class="dialog-actions">
       <button class="btn btn-primary" id="connectSave">Connect</button>
-      <button class="btn btn-ghost" id="connectDemo">Use demo data</button>
       <button class="btn btn-ghost" id="connectCancel">Cancel</button>
     </div>
     <p style="margin-top:14px;margin-bottom:0;font-size:12px">The URL is stored in this browser only. Nothing is sent anywhere except your own Apps Script endpoint.</p>
@@ -868,9 +867,6 @@
   document.getElementById("connectCancel").addEventListener("click", function(){ scrim.hidden = true; });
   scrim.addEventListener("click", function(e){ if(e.target===scrim) scrim.hidden = true; });
   document.addEventListener("keydown", function(e){ if(e.key==="Escape") scrim.hidden = true; });
-  document.getElementById("connectDemo").addEventListener("click", function(){
-    scrim.hidden = true; goDemo(); toast("ok","Demo data","Running on the built-in sample scenario.");
-  });
   document.getElementById("connectSave").addEventListener("click", function(){
     var url = document.getElementById("endpointInput").value.trim();
     if(!/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec$/.test(url)){
