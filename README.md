@@ -2,6 +2,8 @@
 
 A recurring task tracking, pending report and escalation system built on Google Sheets + Apps Script, with an interactive web demo.
 
+Made by **Suraj** ([@suraj944](https://github.com/suraj944)).
+
 **[▶ Open the live demo](https://suraj944.github.io/recurring-task-automation/)**
 
 ## The problem
@@ -51,3 +53,7 @@ Runs entirely in the browser on mock data — nothing connects to a real sheet. 
 ## Running locally
 
 Open `index.html` in a browser. That's it.
+
+---
+
+Made by **Suraj** ([@suraj944](https://github.com/suraj944)).
